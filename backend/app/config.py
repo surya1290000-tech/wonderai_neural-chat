@@ -20,8 +20,9 @@ class Settings(BaseSettings):
     JWT_EXPIRY_HOURS: int = 24
     JWT_REFRESH_EXPIRY_DAYS: int = 30
     
-    # Database
-    DATABASE_URL: str = "sqlite+aiosqlite:///./data/wonderai.db"
+    # Database — PostgreSQL for Docker/production, SQLite for local dev
+    # Override in .env: DATABASE_URL=sqlite+aiosqlite:///./data/wonderai.db
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@db:5432/wonderai"
     
     # AI Provider - "openai" or "ollama" or "gemini"
     AI_PROVIDER: str = "openai"
@@ -76,7 +77,8 @@ if not settings.DEBUG and settings.SECRET_KEY == "change-this-secret-key-in-prod
         "Set a strong SECRET_KEY in your .env for production."
     )
 
-# Ensure data directories exist
+# Ensure data directories exist (only needed for SQLite / local uploads)
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 os.makedirs(settings.VECTORSTORE_DIR, exist_ok=True)
-os.makedirs("./data", exist_ok=True)
+if settings.DATABASE_URL.startswith("sqlite"):
+    os.makedirs("./data", exist_ok=True)

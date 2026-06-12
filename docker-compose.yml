@@ -1,6 +1,21 @@
-version: '3.9'
-
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: wonderai
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d wonderai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
@@ -8,14 +23,20 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./backend/data:/app/data
+      - backend_uploads:/app/data/uploads
+      - backend_vectorstore:/app/data/vectorstore
     environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/wonderai
+      - SECRET_KEY=${SECRET_KEY:-change-in-production}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
       - AI_PROVIDER=${AI_PROVIDER:-openai}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
-      - SECRET_KEY=${SECRET_KEY:-change-in-production}
+      - ALLOWED_ORIGINS=["http://localhost:5173","http://localhost:3000"]
     depends_on:
-      - ollama
+      db:
+        condition: service_healthy
     restart: unless-stopped
 
   frontend:
@@ -36,6 +57,8 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     restart: unless-stopped
+    profiles:
+      - ollama
     # Uncomment for GPU support:
     # deploy:
     #   resources:
@@ -46,4 +69,7 @@ services:
     #           capabilities: [gpu]
 
 volumes:
+  pg_data:
+  backend_uploads:
+  backend_vectorstore:
   ollama_data:
