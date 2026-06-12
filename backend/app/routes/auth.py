@@ -1,20 +1,23 @@
-"""Authentication routes - register, login, refresh, logout, profile"""
+"""Authentication routes - register, login, refresh, logout, profile, and OTP verify"""
 
 import re
+import secrets
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Depends, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from pydantic import BaseModel, EmailStr, field_validator
 
 from app.config import settings
 from app.database import get_db
-from app.models.user import User
+from app.models.user import User, EmailOTP
 from app.utils.auth import (
     hash_password, verify_password,
     create_token, create_token_pair,
     get_current_user, blacklist_token, verify_refresh_token,
 )
+from app.utils.email import send_otp_email
 
 router = APIRouter()
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -48,6 +51,10 @@ class LoginRequest(BaseModel):
     email: EmailStr
     password: str
 
+class VerifyOTPRequest(BaseModel):
+    email: EmailStr
+    otp_code: str
+
 class RefreshRequest(BaseModel):
     refresh_token: str
 
@@ -65,22 +72,91 @@ class ChangePasswordRequest(BaseModel):
         return v
 
 
+async def _generate_and_send_otp(db: AsyncSession, email: str, purpose: str):
+    """Generate 6-digit OTP, save to DB, and send email."""
+    # Delete any existing OTPs for this email and purpose to prevent spam/confusion
+    await db.execute(delete(EmailOTP).where(EmailOTP.email == email).where(EmailOTP.purpose == purpose))
+    
+    otp_code = "".join(str(secrets.randbelow(10)) for _ in range(6))
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+    
+    otp_record = EmailOTP(
+        email=email,
+        otp_code=otp_code,
+        purpose=purpose,
+        expires_at=expires_at
+    )
+    db.add(otp_record)
+    await db.commit()
+    
+    await send_otp_email(email, otp_code, purpose)
+
+
 @router.post("/register")
 async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
     # Check email uniqueness
     result = await db.execute(select(User).where(User.email == req.email))
-    if result.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Email already registered")
+    existing_user = result.scalar_one_or_none()
+    
+    if existing_user:
+        if existing_user.is_verified:
+            raise HTTPException(status_code=400, detail="Email already registered")
+        else:
+            # If unverified, allow them to restart registration or resend OTP
+            pass 
     
     # Check username uniqueness
     result = await db.execute(select(User).where(User.username == req.username))
-    if result.scalar_one_or_none():
+    existing_user_by_username = result.scalar_one_or_none()
+    if existing_user_by_username and existing_user_by_username.email != req.email:
         raise HTTPException(status_code=400, detail="Username already taken")
     
-    user = User(email=req.email, username=req.username, hashed_password=hash_password(req.password))
-    db.add(user)
+    if existing_user and not existing_user.is_verified:
+        # Update existing unverified user
+        existing_user.username = req.username
+        existing_user.hashed_password = hash_password(req.password)
+    else:
+        user = User(email=req.email, username=req.username, hashed_password=hash_password(req.password), is_verified=False)
+        db.add(user)
+    
+    await _generate_and_send_otp(db, req.email, "register")
+    
+    return {
+        "message": "Verification code sent to email",
+        "require_otp": True,
+        "purpose": "register"
+    }
+
+@router.post("/verify-email")
+async def verify_email(req: VerifyOTPRequest, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(EmailOTP)
+        .where(EmailOTP.email == req.email)
+        .where(EmailOTP.purpose == "register")
+        .where(EmailOTP.otp_code == req.otp_code)
+    )
+    otp_record = result.scalar_one_or_none()
+    
+    if not otp_record:
+        raise HTTPException(status_code=400, detail="Invalid verification code")
+    
+    if otp_record.expires_at < datetime.now(timezone.utc).replace(tzinfo=None):
+        await db.execute(delete(EmailOTP).where(EmailOTP.id == otp_record.id))
+        await db.commit()
+        raise HTTPException(status_code=400, detail="Verification code expired")
+    
+    # Mark user as verified
+    user_result = await db.execute(select(User).where(User.email == req.email))
+    user = user_result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    user.is_verified = True
+    
+    # Clean up OTP
+    await db.execute(delete(EmailOTP).where(EmailOTP.email == req.email).where(EmailOTP.purpose == "register"))
     await db.commit()
-    await db.refresh(user)
     
     tokens = create_token_pair(user.id)
     return {
@@ -89,6 +165,7 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
         "user": {"id": user.id, "email": user.email, "username": user.username}
     }
 
+
 @router.post("/login")
 async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == req.email))
@@ -96,6 +173,53 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     
     if not user or not verify_password(req.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+        
+    if not user.is_verified:
+        # If they haven't verified email yet, treat it as a register flow continuation
+        await _generate_and_send_otp(db, req.email, "register")
+        return {
+            "message": "Please verify your email address. Code sent to email.",
+            "require_otp": True,
+            "purpose": "register"
+        }
+    
+    # User is verified, require 2FA
+    await _generate_and_send_otp(db, req.email, "login")
+    
+    return {
+        "message": "2FA code sent to email",
+        "require_otp": True,
+        "purpose": "login"
+    }
+
+@router.post("/verify-2fa")
+async def verify_2fa(req: VerifyOTPRequest, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(EmailOTP)
+        .where(EmailOTP.email == req.email)
+        .where(EmailOTP.purpose == "login")
+        .where(EmailOTP.otp_code == req.otp_code)
+    )
+    otp_record = result.scalar_one_or_none()
+    
+    if not otp_record:
+        raise HTTPException(status_code=400, detail="Invalid 2FA code")
+    
+    if otp_record.expires_at < datetime.now(timezone.utc).replace(tzinfo=None):
+        await db.execute(delete(EmailOTP).where(EmailOTP.id == otp_record.id))
+        await db.commit()
+        raise HTTPException(status_code=400, detail="2FA code expired")
+    
+    # Issue tokens
+    user_result = await db.execute(select(User).where(User.email == req.email))
+    user = user_result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Clean up OTP
+    await db.execute(delete(EmailOTP).where(EmailOTP.email == req.email).where(EmailOTP.purpose == "login"))
+    await db.commit()
     
     tokens = create_token_pair(user.id)
     return {
@@ -103,6 +227,7 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
         "refresh_token": tokens["refresh_token"],
         "user": {"id": user.id, "email": user.email, "username": user.username}
     }
+
 
 @router.post("/refresh")
 async def refresh_token(req: RefreshRequest, db: AsyncSession = Depends(get_db)):
@@ -116,7 +241,6 @@ async def refresh_token(req: RefreshRequest, db: AsyncSession = Depends(get_db))
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     
-    # Create new access token (keep same refresh token)
     new_access = create_token(user_id, "access")
     return {"token": new_access, "user": {"id": user.id, "email": user.email, "username": user.username}}
 
