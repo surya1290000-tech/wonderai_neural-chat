@@ -9,9 +9,14 @@ from contextlib import asynccontextmanager
 
 from app.config import settings
 from app.database import init_db
-from app.routes import auth, chat, rag, models, tools
+import os
+from fastapi.staticfiles import StaticFiles
+from app.routes import auth, chat, rag, models, tools, images
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.logging import LoggingMiddleware
+
+STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
+os.makedirs(STATIC_DIR, exist_ok=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -25,6 +30,9 @@ app = FastAPI(
     version="3.0.0",
     lifespan=lifespan
 )
+
+# Serve static generated images
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # Middleware stack (order matters: last added = first executed)
 # 1. Logging (outermost — logs everything)
@@ -48,6 +56,7 @@ app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
 app.include_router(rag.router, prefix="/api/rag", tags=["RAG"])
 app.include_router(models.router, prefix="/api/models", tags=["Models"])
 app.include_router(tools.router, prefix="/api/tools", tags=["Tools"])
+app.include_router(images.router, prefix="/api/images", tags=["Images"])
 
 @app.get("/")
 async def root():

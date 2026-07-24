@@ -14,21 +14,25 @@ from google.genai import types
 
 from app.config import settings
 
-# Known valid Gemini models — used to catch deprecated models stored in DB sessions
+# Known valid Gemini models — used to catch invalid/deprecated models stored in DB sessions
 VALID_GEMINI_MODELS = {
-    "gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.5-pro",
-    "gemini-3.1-pro-preview",
-    "gemini-3-flash-preview", "gemini-3-pro-preview", "gemini-3.5-flash",
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-flash-latest",
+    "gemini-pro-latest",
 }
 
-# Reliable fallback model when the selected model is unavailable (503)
-GEMINI_FALLBACK_MODEL = "gemini-2.0-flash"
+# Reliable fallback model when the selected model is rate limited (429) or unavailable (503/404)
+GEMINI_FALLBACK_MODEL = "gemini-flash-latest"
 
 # Import tool registry and register all tools
 from app.services.tools import tool_registry
 import app.services.tools.web_search    # registers web_search
 import app.services.tools.code_executor  # registers run_code
 import app.services.tools.weather        # registers get_weather
+import app.services.tools.image_generator  # registers generate_image
 
 # Role-based system prompts for different modes
 ROLE_PROMPTS = {
@@ -62,7 +66,25 @@ class AIService:
         
         # RAG: Inject retrieved context into system prompt if available
         if rag_context:
-            sys_prompt += f"\n\nRelevant context from uploaded documents:\n{rag_context}\n\nUse this context to answer the user's question when relevant."
+            sys_prompt += (
+                "\n\n## DOCUMENT CONTEXT (from user-uploaded files)\n"
+                "You have access to the following retrieved passages from the user's uploaded documents. "
+                "Each passage includes its source filename, page number (if available), and relevance score.\n\n"
+                f"{rag_context}\n\n"
+                "## INSTRUCTIONS FOR USING DOCUMENT CONTEXT\n"
+                "1. **Prioritize document context**: When the user's question relates to the uploaded documents, "
+                "base your answer primarily on the retrieved passages above rather than your general knowledge.\n"
+                "2. **Cite your sources**: Reference the source filename and page number when answering "
+                "(e.g., 'According to report.pdf (Page 3), ...').\n"
+                "3. **Handle tables and data**: If the context contains tabular data, present it clearly "
+                "in your response using markdown tables or structured formatting.\n"
+                "4. **Admit gaps**: If the retrieved context does not contain enough information to fully answer "
+                "the question, clearly state: 'The uploaded documents do not contain sufficient information about [topic]. "
+                "Based on my general knowledge: ...' and then provide your best answer.\n"
+                "5. **Synthesize across chunks**: If multiple passages are relevant, synthesize the information "
+                "into a coherent answer rather than repeating each chunk separately.\n"
+                "6. **Be precise**: Quote exact figures, dates, and names from the documents when available."
+            )
         
         # Tools: Inject tool descriptions into system prompt
         if enable_tools:
@@ -241,13 +263,16 @@ class AIService:
         self,
         history: List[Dict],
         user_message: str,
+        images: Optional[List[str]] = None,
+        max_tokens: Optional[int] = None,
+        top_p: Optional[float] = None,
         model: str = None,
         temperature: float = 0.7,
         mode: str = "default",
         system_prompt: Optional[str] = None,
         rag_context: Optional[str] = None
     ) -> AsyncGenerator[str, None]:
-        """Stream response from Google Gemini via google-genai SDK with tool support"""
+        """Stream response from Google Gemini via google-genai SDK with multimodal vision and tool support"""
         
         if not self.gemini_client:
             yield "data: " + json.dumps({"error": "Gemini API key not configured. Set GEMINI_API_KEY in .env"}) + "\n\n"
@@ -265,7 +290,19 @@ class AIService:
         sys_prompt = system_prompt or ROLE_PROMPTS.get(mode, ROLE_PROMPTS["default"])
         
         if rag_context:
-            sys_prompt += f"\n\nRelevant context from uploaded documents:\n{rag_context}\n\nUse this context to answer the user's question when relevant."
+            sys_prompt += (
+                "\n\n## DOCUMENT CONTEXT (from user-uploaded files)\n"
+                "CRITICAL SYSTEM DIRECTIVE: You HAVE full access to read, analyze, and answer questions about the user's uploaded files and PDFs provided in the context below. "
+                "NEVER claim that you cannot view, open, or process direct file attachments or uploaded PDFs. "
+                "The text content of the uploaded files is extracted and attached below for your immediate inspection.\n\n"
+                f"{rag_context}\n\n"
+                "## INSTRUCTIONS FOR USING DOCUMENT CONTEXT\n"
+                "1. **Prioritize document context**: Base your answers on the retrieved passages above.\n"
+                "2. **Cite your sources**: Reference the source filename and page number when answering.\n"
+                "3. **Handle tables and data**: Present tabular data using clean markdown tables.\n"
+                "4. **Summarize or answer directly**: If the user asks general questions like 'i uploaded pdf' or 'summarize my file', summarize the key points of the attached document passages above.\n"
+                "5. **Be precise**: Quote exact figures, dates, and names from the documents when available."
+            )
         
         # Add tool descriptions
         tool_desc = tool_registry.get_tool_descriptions()
@@ -277,13 +314,35 @@ class AIService:
         for msg in history:
             role = "user" if msg["role"] == "user" else "model"
             contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg["content"])]))
-        contents.append(types.Content(role="user", parts=[types.Part.from_text(text=user_message)]))
         
-        config = types.GenerateContentConfig(
-            system_instruction=sys_prompt,
-            temperature=temperature,
-            max_output_tokens=2048,
-        )
+        # Build user parts including text and optional multimodal images
+        user_parts = [types.Part.from_text(text=user_message)]
+        if images:
+            import base64
+            for img_str in images:
+                try:
+                    if "," in img_str:
+                        mime_type = img_str.split(";")[0].replace("data:", "")
+                        b64_data = img_str.split(",")[1]
+                    else:
+                        mime_type = "image/jpeg"
+                        b64_data = img_str
+                    img_bytes = base64.b64decode(b64_data)
+                    user_parts.append(types.Part.from_bytes(data=img_bytes, mime_type=mime_type))
+                except Exception as img_err:
+                    print(f"Warning: failed to decode image part: {img_err}")
+        
+        contents.append(types.Content(role="user", parts=user_parts))
+        
+        config_kwargs = {
+            "system_instruction": sys_prompt,
+            "temperature": temperature,
+            "max_output_tokens": max_tokens or 2048,
+        }
+        if top_p is not None:
+            config_kwargs["top_p"] = top_p
+            
+        config = types.GenerateContentConfig(**config_kwargs)
         
         try:
             accumulated = ""
@@ -305,38 +364,39 @@ class AIService:
                     break  # Success — exit retry loop
                 except Exception as retry_err:
                     err_str = str(retry_err)
-                    if "503" in err_str or "UNAVAILABLE" in err_str:
+                    is_transient = any(k in err_str for k in ["503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "404", "NOT_FOUND"])
+                    if is_transient:
                         last_error = retry_err
-                        if attempt < 2:
-                            wait = (attempt + 1) * 2  # 2s, 4s
-                            print(f"DEBUG: Model '{model}' returned 503, retrying in {wait}s (attempt {attempt + 1}/3)")
-                            retry_msg = f"\u26a0\ufe0f Model busy, retrying in {wait}s...\n"
-                            yield f"data: {json.dumps({'content': retry_msg, 'done': False})}\n\n"
-                            await asyncio.sleep(wait)
-                            accumulated = ""  # Reset for retry
-                        else:
-                            # Final attempt failed — try fallback model
-                            if model != GEMINI_FALLBACK_MODEL:
-                                print(f"DEBUG: All retries failed for '{model}', falling back to '{GEMINI_FALLBACK_MODEL}'")
-                                switch_msg = f"\u26a0\ufe0f Switching to {GEMINI_FALLBACK_MODEL}...\n\n"
-                                yield f"data: {json.dumps({'content': switch_msg, 'done': False})}\n\n"
-                                model = GEMINI_FALLBACK_MODEL
+                        # Try fallback models in priority order
+                        fallback_candidates = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.0-flash"]
+                        succeeded = False
+                        for fb in fallback_candidates:
+                            if fb == model:
+                                continue
+                            print(f"DEBUG: Model '{model}' failed ({err_str[:80]}), trying fallback '{fb}'...")
+                            switch_msg = f"⚠️ *Note: {model} reached rate limit. Switched to {fb} for a seamless response.*\n\n"
+                            yield f"data: {json.dumps({'content': switch_msg, 'done': False})}\n\n"
+                            try:
                                 accumulated = ""
-                                try:
-                                    response = await self.gemini_client.aio.models.generate_content_stream(
-                                        model=model, contents=contents, config=config,
-                                    )
-                                    async for chunk in response:
-                                        text = chunk.text or ""
-                                        if text:
-                                            accumulated += text
-                                            yield f"data: {json.dumps({'content': text, 'done': False})}\n\n"
-                                    last_error = None
-                                except Exception as fallback_err:
-                                    last_error = fallback_err
-                            # else: already on fallback, give up
+                                response = await self.gemini_client.aio.models.generate_content_stream(
+                                    model=fb, contents=contents, config=config,
+                                )
+                                async for chunk in response:
+                                    text = chunk.text or ""
+                                    if text:
+                                        accumulated += text
+                                        yield f"data: {json.dumps({'content': text, 'done': False})}\n\n"
+                                model = fb
+                                last_error = None
+                                succeeded = True
+                                break
+                            except Exception as fb_err:
+                                print(f"DEBUG: Fallback '{fb}' failed too: {fb_err}")
+                                last_error = fb_err
+                        if succeeded:
+                            break
                     else:
-                        raise  # Non-503 error — don't retry
+                        raise
             
             if last_error:
                 yield f"data: {json.dumps({'error': str(last_error)})}\n\n"
@@ -347,24 +407,49 @@ class AIService:
             if tool_results:
                 for result in tool_results:
                     yield f"data: {json.dumps({'tool_result': result, 'done': False})}\n\n"
+                    # If an image was generated, yield markdown directly to render the image card
+                    if result.get("tool") == "generate_image" and isinstance(result.get("result"), dict):
+                        md = result["result"].get("markdown")
+                        if md:
+                            img_content = "\n\n" + md
+                            yield f"data: {json.dumps({'content': img_content, 'done': False})}\n\n"
                 
-                # Follow-up with tool results
-                contents.append(types.Content(role="model", parts=[types.Part.from_text(text=accumulated)]))
-                tool_context = "\n\n".join([
-                    f"Tool '{r['tool']}' returned:\n{json.dumps(r.get('result', r.get('error', '')), indent=2)}"
-                    for r in tool_results
-                ])
-                contents.append(types.Content(role="user", parts=[types.Part.from_text(text=f"Here are the tool results. Use them to provide a complete answer. Do NOT call any more tools.\n\n{tool_context}")]))
-                
-                follow_up = await self.gemini_client.aio.models.generate_content_stream(
-                    model=model,
-                    contents=contents,
-                    config=config,
-                )
-                async for chunk in follow_up:
-                    text = chunk.text or ""
-                    if text:
-                        yield f"data: {json.dumps({'content': text, 'done': False})}\n\n"
+                # If tool was generate_image, image card is already emitted; skip redundant follow-up call
+                has_image_tool = any(r.get("tool") == "generate_image" for r in tool_results)
+                if not has_image_tool:
+                    contents.append(types.Content(role="model", parts=[types.Part.from_text(text=accumulated)]))
+                    tool_context = "\n\n".join([
+                        f"Tool '{r['tool']}' returned:\n{json.dumps(r.get('result', r.get('error', '')), indent=2)}"
+                        for r in tool_results
+                    ])
+                    contents.append(types.Content(role="user", parts=[types.Part.from_text(text=f"Here are the tool results. Use them to provide a complete answer. Do NOT call any more tools.\n\n{tool_context}")]))
+                    
+                    try:
+                        follow_up = await self.gemini_client.aio.models.generate_content_stream(
+                            model=model,
+                            contents=contents,
+                            config=config,
+                        )
+                        async for chunk in follow_up:
+                            text = chunk.text or ""
+                            if text:
+                                yield f"data: {json.dumps({'content': text, 'done': False})}\n\n"
+                    except Exception as follow_err:
+                        print(f"DEBUG: Follow-up stream error ignored: {follow_err}")
+            else:
+                # Direct Image Prompt Fallback: If user asks to generate an image but LLM didn't call tool block
+                msg_lower = user_message.lower()
+                is_image_req = any(k in msg_lower for k in ["generate an image", "generate image", "draw an image", "draw image", "create an image", "make an image"]) or msg_lower.startswith("draw ")
+                if is_image_req:
+                    print(f"DEBUG: Triggering direct image generation fallback for: '{user_message}'")
+                    try:
+                        from app.services.image_service import image_service
+                        img_res = await image_service.generate_image(user_message)
+                        md = f"![{img_res['prompt']}]({img_res['url']})"
+                        direct_img_content = "\n\nHere is your generated image:\n\n" + md
+                        yield f"data: {json.dumps({'content': direct_img_content, 'done': False})}\n\n"
+                    except Exception as direct_img_err:
+                        print(f"DEBUG: Direct image fallback error: {direct_img_err}")
             
             yield f"data: {json.dumps({'content': '', 'done': True})}\n\n"
         

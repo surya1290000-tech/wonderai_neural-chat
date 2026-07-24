@@ -48,6 +48,16 @@ export function AuthProvider({ children }) {
     return data
   }
 
+  const forgotPassword = async (email) => {
+    const { data } = await authAPI.forgotPassword({ email })
+    return data
+  }
+
+  const resetPassword = async (email, otp_code, new_password) => {
+    const { data } = await authAPI.resetPassword({ email, otp_code, new_password })
+    return data
+  }
+
   const _saveAuth = (data) => {
     localStorage.setItem('nc_token', data.token)
     localStorage.setItem('nc_refresh_token', data.refresh_token)
@@ -72,7 +82,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, login, register, verifyEmail, verify2FA, logout, updateProfile, loading }}>
+    <AuthContext.Provider value={{ user, login, register, verifyEmail, verify2FA, logout, updateProfile, forgotPassword, resetPassword, loading }}>
       {children}
     </AuthContext.Provider>
   )

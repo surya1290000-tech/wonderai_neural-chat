@@ -8,13 +8,12 @@ router = APIRouter()
 
 OPENAI_MODELS = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"]
 GEMINI_MODELS = [
-    "gemini-2.0-flash",
     "gemini-2.5-flash",
     "gemini-2.5-pro",
-    "gemini-3.1-pro-preview",
-    "gemini-3-flash-preview",
-    "gemini-3-pro-preview",
-    "gemini-3.5-flash",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-flash-latest",
+    "gemini-pro-latest",
 ]
 
 @router.get("/")

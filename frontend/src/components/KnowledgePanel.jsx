@@ -1,11 +1,29 @@
 import { useState, useEffect } from 'react'
 import { ragAPI } from '../utils/api'
 
-export default function KnowledgePanel({ isOpen, onClose, onUploadDocument, showNotif, sessionId }) {
+export default function KnowledgePanel({ isOpen, onClose, onUploadDocument, showNotif, sessionId, refreshTrigger }) {
   const [documents, setDocuments] = useState([])
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(false)
   const [dragActive, setDragActive] = useState(false)
+  const [urlInput, setUrlInput] = useState('')
+  const [urlIngesting, setUrlIngesting] = useState(false)
+
+  const handleIngestUrl = async () => {
+    if (!urlInput.trim() || !sessionId) return
+    try {
+      setUrlIngesting(true)
+      showNotif(`Fetching & scraping URL...`, "info")
+      await ragAPI.ingestUrl(urlInput.trim(), sessionId)
+      showNotif(`✓ Web page content ingested into Knowledge Base!`)
+      setUrlInput('')
+      loadData()
+    } catch (e) {
+      showNotif(e.response?.data?.detail || "Failed to scrape URL", "error")
+    } finally {
+      setUrlIngesting(false)
+    }
+  }
 
   const loadData = async () => {
     if (!sessionId) return
@@ -26,12 +44,12 @@ export default function KnowledgePanel({ isOpen, onClose, onUploadDocument, show
   useEffect(() => {
     if (isOpen && sessionId) {
       loadData()
-    } else {
+    } else if (!isOpen) {
       // Reset state when session changes or panel closes
       setDocuments([])
       setStats(null)
     }
-  }, [isOpen, sessionId])
+  }, [isOpen, sessionId, refreshTrigger])
 
   const handleDelete = async (id) => {
     if (!window.confirm("Delete this document from the knowledge base?")) return
@@ -116,13 +134,13 @@ export default function KnowledgePanel({ isOpen, onClose, onUploadDocument, show
               }}
               style={{
                 border: `2px dashed ${dragActive ? 'var(--accent)' : 'var(--border)'}`,
-                borderRadius: 12, padding: '24px 16px',
+                borderRadius: 12, padding: '20px 16px',
                 textAlign: 'center', background: dragActive ? 'var(--accent-glow)' : 'transparent',
                 transition: 'all 0.2s', cursor: 'pointer',
               }}
               onClick={() => document.getElementById('kb-file-upload').click()}
             >
-              <div style={{ fontSize: 24, marginBottom: 8 }}>📄</div>
+              <div style={{ fontSize: 22, marginBottom: 6 }}>📄</div>
               <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)' }}>
                 Upload Document
               </div>
@@ -138,6 +156,34 @@ export default function KnowledgePanel({ isOpen, onClose, onUploadDocument, show
                   e.target.value = null
                 }}
               />
+            </div>
+
+            {/* URL Ingestion Box */}
+            <div style={{ marginTop: 12, display: 'flex', gap: 6 }}>
+              <input
+                type="text"
+                placeholder="https://example.com/doc"
+                value={urlInput}
+                onChange={e => setUrlInput(e.target.value)}
+                style={{
+                  flex: 1, background: 'rgba(255,255,255,0.03)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 8, padding: '6px 10px',
+                  fontSize: 12, color: 'var(--text-primary)', outline: 'none',
+                }}
+              />
+              <button
+                onClick={handleIngestUrl}
+                disabled={!urlInput.trim() || urlIngesting}
+                style={{
+                  background: 'var(--accent)', color: '#fff', border: 'none',
+                  borderRadius: 8, padding: '6px 12px', fontSize: 12,
+                  fontWeight: 600, cursor: urlInput.trim() ? 'pointer' : 'default',
+                  opacity: urlInput.trim() && !urlIngesting ? 1 : 0.5,
+                }}
+              >
+                {urlIngesting ? '...' : '🌐 Fetch'}
+              </button>
             </div>
           </div>
 

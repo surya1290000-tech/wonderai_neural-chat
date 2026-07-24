@@ -85,6 +85,8 @@ export const authAPI = {
   refresh: (refreshToken) => api.post('/auth/refresh', { refresh_token: refreshToken }),
   me: () => api.get('/auth/me'),
   changePassword: (d) => api.post('/auth/change-password', d),
+  forgotPassword: (d) => api.post('/auth/forgot-password', d),
+  resetPassword: (d) => api.post('/auth/reset-password', d),
 }
 
 // Chat sessions
@@ -111,26 +113,39 @@ export const ragAPI = {
     fd.append('file', file)
     return api.post(`/rag/upload?session_id=${sessionId}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
   },
+  ingestUrl: (url, sessionId) => api.post(`/rag/ingest-url?session_id=${sessionId}`, { url }),
   getDocuments: (sessionId) => api.get(`/rag/documents?session_id=${sessionId}`),
   deleteDocument: (id, sessionId) => api.delete(`/rag/documents/${id}?session_id=${sessionId}`),
   stats: (sessionId) => api.get(`/rag/stats?session_id=${sessionId}`),
 }
 
+// Images API
+export const imagesAPI = {
+  generate: (d) => api.post('/images/generate', d),
+}
+
 /**
  * STREAMING: Opens a fetch SSE connection to the streaming endpoint
  * Returns an EventSource-like stream via ReadableStream
- * Now supports AbortController signal for stop generation
+ * Supports AbortController signal, images, max_tokens, top_p
  */
-export async function streamMessage(sessionId, content, useRag, onChunk, onDone, onError, signal) {
+export async function streamMessage(sessionId, content, useRag, onChunk, onDone, onError, signal, opts = {}) {
   const token = localStorage.getItem('nc_token')
   try {
+    const body = {
+      content,
+      use_rag: useRag,
+      images: opts.images || null,
+      max_tokens: opts.maxTokens || null,
+      top_p: opts.topP || null,
+    }
     const response = await fetch(`${BASE}/chat/sessions/${sessionId}/messages/stream`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ content, use_rag: useRag }),
+      body: JSON.stringify(body),
       signal,
     })
 

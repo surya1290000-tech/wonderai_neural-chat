@@ -19,6 +19,16 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRY_HOURS: int = 24
     JWT_REFRESH_EXPIRY_DAYS: int = 30
+    ENABLE_2FA: bool = False
+    
+    # Email / SMTP Settings
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = ""
+    SMTP_USE_TLS: bool = True
+
     
     # Database — PostgreSQL for Docker/production, SQLite for local dev
     # Override in .env: DATABASE_URL=sqlite+aiosqlite:///./data/wonderai.db
@@ -37,13 +47,13 @@ class Settings(BaseSettings):
     
     # Gemini (Option C) - Google AI
     GEMINI_API_KEY: str = ""
-    GEMINI_DEFAULT_MODEL: str = "gemini-2.0-flash"
+    GEMINI_DEFAULT_MODEL: str = "gemini-flash-latest"
     
     # RAG settings
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
-    CHUNK_SIZE: int = 500
-    CHUNK_OVERLAP: int = 50
-    TOP_K_RESULTS: int = 3
+    CHUNK_SIZE: int = 300
+    CHUNK_OVERLAP: int = 75
+    TOP_K_RESULTS: int = 5
     UPLOAD_DIR: str = "./data/uploads"
     VECTORSTORE_DIR: str = "./data/vectorstore"
     MAX_UPLOAD_SIZE_MB: int = 20

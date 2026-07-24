@@ -71,6 +71,23 @@ class ChangePasswordRequest(BaseModel):
             raise ValueError(f"Password must be at most {settings.MAX_PASSWORD_LENGTH} characters")
         return v
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+    otp_code: str
+    new_password: str
+    
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v):
+        if len(v) < settings.MIN_PASSWORD_LENGTH:
+            raise ValueError(f"Password must be at least {settings.MIN_PASSWORD_LENGTH} characters")
+        if len(v) > settings.MAX_PASSWORD_LENGTH:
+            raise ValueError(f"Password must be at most {settings.MAX_PASSWORD_LENGTH} characters")
+        return v
+
 
 async def _generate_and_send_otp(db: AsyncSession, email: str, purpose: str):
     """Generate 6-digit OTP, save to DB, and send email."""
@@ -78,7 +95,7 @@ async def _generate_and_send_otp(db: AsyncSession, email: str, purpose: str):
     await db.execute(delete(EmailOTP).where(EmailOTP.email == email).where(EmailOTP.purpose == purpose))
     
     otp_code = "".join(str(secrets.randbelow(10)) for _ in range(6))
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+    expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=10)
     
     otp_record = EmailOTP(
         email=email,
@@ -99,10 +116,10 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
     existing_user = result.scalar_one_or_none()
     
     if existing_user:
-        if existing_user.is_verified:
+        if existing_user.is_verified or not settings.ENABLE_2FA:
             raise HTTPException(status_code=400, detail="Email already registered")
         else:
-            # If unverified, allow them to restart registration or resend OTP
+            # If unverified and 2FA is enabled, allow restarting registration
             pass 
     
     # Check username uniqueness
@@ -111,20 +128,33 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
     if existing_user_by_username and existing_user_by_username.email != req.email:
         raise HTTPException(status_code=400, detail="Username already taken")
     
+    is_verified = not settings.ENABLE_2FA
     if existing_user and not existing_user.is_verified:
         # Update existing unverified user
         existing_user.username = req.username
         existing_user.hashed_password = hash_password(req.password)
+        existing_user.is_verified = is_verified
+        user = existing_user
     else:
-        user = User(email=req.email, username=req.username, hashed_password=hash_password(req.password), is_verified=False)
+        user = User(email=req.email, username=req.username, hashed_password=hash_password(req.password), is_verified=is_verified)
         db.add(user)
     
-    await _generate_and_send_otp(db, req.email, "register")
+    await db.commit()
+    await db.refresh(user)
+
+    if settings.ENABLE_2FA:
+        await _generate_and_send_otp(db, req.email, "register")
+        return {
+            "message": "Verification code sent to email",
+            "require_otp": True,
+            "purpose": "register"
+        }
     
+    tokens = create_token_pair(user.id)
     return {
-        "message": "Verification code sent to email",
-        "require_otp": True,
-        "purpose": "register"
+        "token": tokens["access_token"],
+        "refresh_token": tokens["refresh_token"],
+        "user": {"id": user.id, "email": user.email, "username": user.username}
     }
 
 @router.post("/verify-email")
@@ -140,7 +170,9 @@ async def verify_email(req: VerifyOTPRequest, db: AsyncSession = Depends(get_db)
     if not otp_record:
         raise HTTPException(status_code=400, detail="Invalid verification code")
     
-    if otp_record.expires_at < datetime.now(timezone.utc).replace(tzinfo=None):
+    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+    exp_naive = otp_record.expires_at.replace(tzinfo=None) if otp_record.expires_at.tzinfo else otp_record.expires_at
+    if exp_naive < now_naive:
         await db.execute(delete(EmailOTP).where(EmailOTP.id == otp_record.id))
         await db.commit()
         raise HTTPException(status_code=400, detail="Verification code expired")
@@ -174,22 +206,29 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     if not user or not verify_password(req.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
         
-    if not user.is_verified:
-        # If they haven't verified email yet, treat it as a register flow continuation
-        await _generate_and_send_otp(db, req.email, "register")
+    if settings.ENABLE_2FA:
+        if not user.is_verified:
+            # If they haven't verified email yet, treat it as a register flow continuation
+            await _generate_and_send_otp(db, req.email, "register")
+            return {
+                "message": "Please verify your email address. Code sent to email.",
+                "require_otp": True,
+                "purpose": "register"
+            }
+        
+        # User is verified, require 2FA
+        await _generate_and_send_otp(db, req.email, "login")
         return {
-            "message": "Please verify your email address. Code sent to email.",
+            "message": "2FA code sent to email",
             "require_otp": True,
-            "purpose": "register"
+            "purpose": "login"
         }
     
-    # User is verified, require 2FA
-    await _generate_and_send_otp(db, req.email, "login")
-    
+    tokens = create_token_pair(user.id)
     return {
-        "message": "2FA code sent to email",
-        "require_otp": True,
-        "purpose": "login"
+        "token": tokens["access_token"],
+        "refresh_token": tokens["refresh_token"],
+        "user": {"id": user.id, "email": user.email, "username": user.username}
     }
 
 @router.post("/verify-2fa")
@@ -205,7 +244,9 @@ async def verify_2fa(req: VerifyOTPRequest, db: AsyncSession = Depends(get_db)):
     if not otp_record:
         raise HTTPException(status_code=400, detail="Invalid 2FA code")
     
-    if otp_record.expires_at < datetime.now(timezone.utc).replace(tzinfo=None):
+    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+    exp_naive = otp_record.expires_at.replace(tzinfo=None) if otp_record.expires_at.tzinfo else otp_record.expires_at
+    if exp_naive < now_naive:
         await db.execute(delete(EmailOTP).where(EmailOTP.id == otp_record.id))
         await db.commit()
         raise HTTPException(status_code=400, detail="2FA code expired")
@@ -270,3 +311,51 @@ async def change_password(
     current_user.hashed_password = hash_password(req.new_password)
     await db.commit()
     return {"message": "Password changed successfully"}
+
+@router.post("/forgot-password")
+async def forgot_password(req: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
+    """Initiates the forgot password flow by sending an OTP to the user's email."""
+    result = await db.execute(select(User).where(User.email == req.email))
+    user = result.scalar_one_or_none()
+    
+    # We do not throw an error if user is not found to prevent email enumeration attacks
+    if user:
+        await _generate_and_send_otp(db, req.email, "reset_password")
+        
+    return {"message": "If an account exists, a password reset code has been sent."}
+
+@router.post("/reset-password")
+async def reset_password(req: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
+    """Resets the user's password using the OTP code."""
+    result = await db.execute(
+        select(EmailOTP)
+        .where(EmailOTP.email == req.email)
+        .where(EmailOTP.purpose == "reset_password")
+        .where(EmailOTP.otp_code == req.otp_code)
+    )
+    otp_record = result.scalar_one_or_none()
+    
+    if not otp_record:
+        raise HTTPException(status_code=400, detail="Invalid reset code")
+    
+    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+    exp_naive = otp_record.expires_at.replace(tzinfo=None) if otp_record.expires_at.tzinfo else otp_record.expires_at
+    if exp_naive < now_naive:
+        await db.execute(delete(EmailOTP).where(EmailOTP.id == otp_record.id))
+        await db.commit()
+        raise HTTPException(status_code=400, detail="Reset code expired")
+    
+    # Update password
+    user_result = await db.execute(select(User).where(User.email == req.email))
+    user = user_result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    user.hashed_password = hash_password(req.new_password)
+    
+    # Clean up OTP
+    await db.execute(delete(EmailOTP).where(EmailOTP.email == req.email).where(EmailOTP.purpose == "reset_password"))
+    await db.commit()
+    
+    return {"message": "Password reset successfully"}

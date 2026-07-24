@@ -47,7 +47,7 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [rememberMe, setRememberMe] = useState(true)
-  const { login, register, verifyEmail, verify2FA } = useAuth()
+  const { login, register, verifyEmail, verify2FA, forgotPassword, resetPassword } = useAuth()
   const navigate = useNavigate()
 
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
@@ -58,8 +58,14 @@ export default function AuthPage() {
       let data;
       if (tab === 'login') {
         data = await login(form.email, form.password)
-      } else {
+      } else if (tab === 'register') {
         data = await register(form.email, form.username, form.password)
+      } else if (tab === 'forgot') {
+        data = await forgotPassword(form.email)
+        setSuccess(data.message)
+        setStep('reset')
+        setLoading(false)
+        return
       }
       
       if (data && data.require_otp) {
@@ -70,6 +76,20 @@ export default function AuthPage() {
       }
     } catch (e) {
       setError(e.response?.data?.detail || 'Something went wrong')
+    }
+    setLoading(false)
+  }
+
+  const submitReset = async () => {
+    setError(''); setSuccess(''); setLoading(true)
+    try {
+      await resetPassword(form.email, form.otp, form.password)
+      setSuccess('Password reset successfully. Please login.')
+      setStep('credentials')
+      setTab('login')
+      setForm(f => ({ ...f, password: '', otp: '' }))
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Invalid reset code or password')
     }
     setLoading(false)
   }
@@ -189,20 +209,29 @@ export default function AuthPage() {
                 borderRadius: 14, padding: 4,
                 marginBottom: 28
               }}>
-                {['login', 'register'].map(t => (
+                {['login', 'register', 'forgot'].map(t => (
                   <button key={t}
-                    onClick={() => { setTab(t); setError(''); setSuccess('') }}
+                    onClick={() => { setTab(t); setError(''); setSuccess(''); setForm(f => ({ ...f, password: '', otp: '' })); }}
                     style={{
-                      flex: 1, padding: '11px 16px', borderRadius: 12,
+                      flex: 1, padding: '11px 8px', borderRadius: 12,
                       background: tab === t ? 'rgba(255,255,255,0.08)' : 'transparent',
                       color: tab === t ? '#ececec' : '#666',
-                      fontWeight: 600, fontSize: 14,
+                      fontWeight: 600, fontSize: 13,
                       cursor: 'pointer', border: 'none',
                       transition: 'all 0.25s ease',
                       fontFamily: 'Outfit',
-                    }}>{t === 'login' ? 'Sign In' : 'Create Account'}</button>
+                      whiteSpace: 'nowrap'
+                    }}>{t === 'login' ? 'Sign In' : (t === 'register' ? 'Create Account' : 'Forgot Password')}</button>
                 ))}
               </div>
+
+              {tab === 'forgot' && (
+                <div style={{ marginBottom: 20, textAlign: 'center' }}>
+                  <p style={{ color: '#aaa', fontSize: 14, margin: 0 }}>
+                    Enter your email to receive a password reset code.
+                  </p>
+                </div>
+              )}
 
               {/* Email */}
               <div style={{ marginBottom: 16 }}>
@@ -235,40 +264,51 @@ export default function AuthPage() {
               )}
 
               {/* Password */}
-              <div style={{ marginBottom: tab === 'register' ? 12 : 20 }}>
-                <label style={{ display: 'block', color: '#888', fontSize: 13, fontWeight: 500, marginBottom: 8 }}>Password</label>
-                <div style={{ position: 'relative' }}>
-                  <input
-                    style={{ ...inputStyle, paddingRight: 44 }}
-                    type={showPassword ? 'text' : 'password'}
-                    value={form.password}
-                    onChange={set('password')}
-                    placeholder="••••••••"
-                    onKeyDown={e => e.key === 'Enter' && submitCredentials()}
-                    onFocus={e => { e.target.style.borderColor = 'rgba(212,132,94,0.4)'; e.target.style.background = 'rgba(255,255,255,0.06)' }}
-                    onBlur={e => { e.target.style.borderColor = 'rgba(255,255,255,0.08)'; e.target.style.background = 'rgba(255,255,255,0.04)' }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    style={{
-                      position: 'absolute', right: 12, top: '50%',
-                      transform: 'translateY(-50%)',
-                      background: 'transparent', border: 'none',
-                      color: '#666', cursor: 'pointer',
-                      fontSize: 16, padding: '4px',
-                      transition: 'color 0.2s',
-                      display: 'flex', alignItems: 'center',
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.color = '#aaa'}
-                    onMouseLeave={e => e.currentTarget.style.color = '#666'}
-                    title={showPassword ? 'Hide password' : 'Show password'}
-                  >
-                    {showPassword ? '🙈' : '👁'}
-                  </button>
+              {tab !== 'forgot' && (
+                <div style={{ marginBottom: tab === 'register' ? 12 : 12 }}>
+                  <label style={{ display: 'block', color: '#888', fontSize: 13, fontWeight: 500, marginBottom: 8 }}>Password</label>
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      style={{ ...inputStyle, paddingRight: 44 }}
+                      type={showPassword ? 'text' : 'password'}
+                      value={form.password}
+                      onChange={set('password')}
+                      placeholder="••••••••"
+                      onKeyDown={e => e.key === 'Enter' && submitCredentials()}
+                      onFocus={e => { e.target.style.borderColor = 'rgba(212,132,94,0.4)'; e.target.style.background = 'rgba(255,255,255,0.06)' }}
+                      onBlur={e => { e.target.style.borderColor = 'rgba(255,255,255,0.08)'; e.target.style.background = 'rgba(255,255,255,0.04)' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      style={{
+                        position: 'absolute', right: 12, top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'transparent', border: 'none',
+                        color: '#666', cursor: 'pointer',
+                        fontSize: 16, padding: '4px',
+                        transition: 'color 0.2s',
+                        display: 'flex', alignItems: 'center',
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.color = '#aaa'}
+                      onMouseLeave={e => e.currentTarget.style.color = '#666'}
+                      title={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? '🙈' : '👁'}
+                    </button>
+                  </div>
+                  {tab === 'register' && <PasswordStrength password={form.password} />}
                 </div>
-                {tab === 'register' && <PasswordStrength password={form.password} />}
-              </div>
+              )}
+
+              {tab === 'login' && (
+                <div style={{ textAlign: 'right', marginBottom: 20 }}>
+                  <span onClick={() => { setTab('forgot'); setError(''); setSuccess(''); setForm(f => ({ ...f, password: '', otp: '' })) }}
+                        style={{ color: '#888', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>
+                    Forgot Password?
+                  </span>
+                </div>
+              )}
 
               {/* Remember me (login only) */}
               {tab === 'login' && (
@@ -300,7 +340,7 @@ export default function AuthPage() {
                 </div>
               )}
             </>
-          ) : (
+          ) : step === 'otp' ? (
             <>
               {/* OTP Step */}
               <div style={{ marginBottom: 20, textAlign: 'center' }}>
@@ -329,6 +369,46 @@ export default function AuthPage() {
                  </button>
               </div>
             </>
+          ) : (
+            <>
+              {/* Reset Password Step */}
+              <div style={{ marginBottom: 20, textAlign: 'center' }}>
+                <p style={{ color: '#aaa', fontSize: 14, marginBottom: 20 }}>
+                  We've sent a password reset code to <strong style={{ color: '#ececec' }}>{form.email}</strong>.
+                </p>
+                <input
+                  style={{ ...inputStyle, marginBottom: 12, textAlign: 'center', letterSpacing: '4px' }}
+                  type="text"
+                  maxLength={6}
+                  value={form.otp}
+                  onChange={e => setForm(f => ({ ...f, otp: e.target.value.replace(/\D/g, '') }))}
+                  placeholder="000000"
+                  onFocus={e => { e.target.style.borderColor = 'rgba(212,132,94,0.4)'; e.target.style.background = 'rgba(255,255,255,0.06)' }}
+                  onBlur={e => { e.target.style.borderColor = 'rgba(255,255,255,0.08)'; e.target.style.background = 'rgba(255,255,255,0.04)' }}
+                />
+                <input
+                  style={{ ...inputStyle, textAlign: 'left', letterSpacing: 'normal', marginBottom: 8 }}
+                  type="password"
+                  value={form.password}
+                  onChange={set('password')}
+                  placeholder="New Password"
+                  onKeyDown={e => e.key === 'Enter' && submitReset()}
+                  onFocus={e => { e.target.style.borderColor = 'rgba(212,132,94,0.4)'; e.target.style.background = 'rgba(255,255,255,0.06)' }}
+                  onBlur={e => { e.target.style.borderColor = 'rgba(255,255,255,0.08)'; e.target.style.background = 'rgba(255,255,255,0.04)' }}
+                />
+                <div style={{ textAlign: 'left' }}>
+                  <PasswordStrength password={form.password} />
+                </div>
+              </div>
+              <div style={{ textAlign: 'center', marginBottom: 20 }}>
+                 <button 
+                   type="button"
+                   onClick={() => { setStep('credentials'); setTab('forgot'); setForm(f => ({ ...f, otp: '', password: '' })); setError(''); setSuccess(''); }}
+                   style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 13, textDecoration: 'underline' }}>
+                   Cancel
+                 </button>
+              </div>
+            </>
           )}
 
           {/* Messages */}
@@ -349,30 +429,42 @@ export default function AuthPage() {
               background: 'rgba(248,113,113,0.08)', borderRadius: 10,
               border: '1px solid rgba(248,113,113,0.15)',
               animation: 'fadeInUp 0.3s ease',
-            }}>{error}</div>
+            }}>
+              {error}
+              {(error === 'Email already registered' || error === 'Invalid credentials' || error === 'Current password is incorrect') && (
+                <div style={{ marginTop: 8 }}>
+                  <span 
+                    onClick={() => { setTab('forgot'); setError(''); setSuccess(''); setForm(f => ({ ...f, password: '', otp: '' })); }} 
+                    style={{ color: '#fff', textDecoration: 'underline', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}
+                  >
+                    Forgot your password? Reset it here.
+                  </span>
+                </div>
+              )}
+            </div>
           )}
 
           {/* Submit */}
           <button
-            onClick={step === 'credentials' ? submitCredentials : submitOTP}
-            disabled={loading || (step === 'otp' && form.otp.length !== 6)}
+            onClick={step === 'credentials' ? submitCredentials : (step === 'reset' ? submitReset : submitOTP)}
+            disabled={loading || ((step === 'otp' || step === 'reset') && form.otp.length !== 6)}
             style={{
               width: '100%',
-              background: loading || (step === 'otp' && form.otp.length !== 6) ? '#333' : 'linear-gradient(135deg, #d4845e, #c07050)',
-              color: loading || (step === 'otp' && form.otp.length !== 6) ? '#888' : '#fff',
+              background: loading || ((step === 'otp' || step === 'reset') && form.otp.length !== 6) ? '#333' : 'linear-gradient(135deg, #d4845e, #c07050)',
+              color: loading || ((step === 'otp' || step === 'reset') && form.otp.length !== 6) ? '#888' : '#fff',
               border: 'none', borderRadius: 14,
               padding: '14px 24px',
               fontWeight: 600, fontSize: 15,
               fontFamily: 'Outfit, sans-serif',
-              cursor: loading || (step === 'otp' && form.otp.length !== 6) ? 'not-allowed' : 'pointer',
+              cursor: loading || ((step === 'otp' || step === 'reset') && form.otp.length !== 6) ? 'not-allowed' : 'pointer',
               transition: 'all 0.3s ease',
-              boxShadow: loading || (step === 'otp' && form.otp.length !== 6) ? 'none' : '0 4px 24px rgba(212,132,94,0.3)',
+              boxShadow: loading || ((step === 'otp' || step === 'reset') && form.otp.length !== 6) ? 'none' : '0 4px 24px rgba(212,132,94,0.3)',
               letterSpacing: '0.01em',
               position: 'relative',
               overflow: 'hidden',
             }}
-            onMouseEnter={e => { if (!loading && !(step === 'otp' && form.otp.length !== 6)) e.target.style.boxShadow = '0 6px 30px rgba(212,132,94,0.4)' }}
-            onMouseLeave={e => { if (!loading && !(step === 'otp' && form.otp.length !== 6)) e.target.style.boxShadow = '0 4px 24px rgba(212,132,94,0.3)' }}
+            onMouseEnter={e => { if (!loading && !((step === 'otp' || step === 'reset') && form.otp.length !== 6)) e.target.style.boxShadow = '0 6px 30px rgba(212,132,94,0.4)' }}
+            onMouseLeave={e => { if (!loading && !((step === 'otp' || step === 'reset') && form.otp.length !== 6)) e.target.style.boxShadow = '0 4px 24px rgba(212,132,94,0.3)' }}
           >
             {loading ? (
               <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
@@ -385,7 +477,7 @@ export default function AuthPage() {
                 Please wait...
               </span>
             ) : (
-              step === 'otp' ? 'Verify Code' : (tab === 'login' ? 'Sign In' : 'Create Account')
+              step === 'otp' ? 'Verify Code' : (step === 'reset' ? 'Reset Password' : (tab === 'login' ? 'Sign In' : (tab === 'register' ? 'Create Account' : 'Send Reset Code')))
             )}
           </button>
         </div>

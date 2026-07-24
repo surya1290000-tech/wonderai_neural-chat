@@ -4,7 +4,10 @@ const ChatInput = forwardRef(function ChatInput({ onSend, disabled, useRag, setU
   const [value, setValue] = useState('')
   const [focused, setFocused] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
+  const [images, setImages] = useState([])
+  const [isListening, setIsListening] = useState(false)
   const textareaRef = useRef()
+  const recognitionRef = useRef(null)
 
   // Expose focus method via ref
   useImperativeHandle(ref, () => ({
@@ -18,10 +21,57 @@ const ChatInput = forwardRef(function ChatInput({ onSend, disabled, useRag, setU
     }
   }, [value])
 
+  const handleImageFile = (file) => {
+    if (!file || !file.type.startsWith('image/')) return
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      setImages(prev => [...prev, { url: e.target.result, name: file.name }])
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const removeImage = (index) => {
+    setImages(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const toggleListening = () => {
+    if (isListening) {
+      recognitionRef.current?.stop()
+      setIsListening(false)
+    } else {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+      if (!SpeechRecognition) {
+        alert('Voice recognition is not supported in this browser. Try Chrome or Edge.')
+        return
+      }
+      const rec = new SpeechRecognition()
+      rec.continuous = true
+      rec.interimResults = true
+      rec.onresult = (e) => {
+        let transcript = ''
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          transcript += e.results[i][0].transcript
+        }
+        setValue(prev => (prev ? prev + ' ' + transcript : transcript))
+      }
+      rec.onend = () => setIsListening(false)
+      rec.onerror = () => setIsListening(false)
+      try {
+        rec.start()
+        recognitionRef.current = rec
+        setIsListening(true)
+      } catch (err) {
+        setIsListening(false)
+      }
+    }
+  }
+
   const send = () => {
-    if (!value.trim() || disabled) return
-    onSend(value.trim())
+    if ((!value.trim() && images.length === 0) || disabled) return
+    const imagePayload = images.map(img => img.url)
+    onSend(value.trim(), imagePayload)
     setValue('')
+    setImages([])
   }
 
   const keyDown = (e) => {
@@ -41,12 +91,16 @@ const ChatInput = forwardRef(function ChatInput({ onSend, disabled, useRag, setU
     e.preventDefault()
     setIsDragOver(false)
     const file = e.dataTransfer.files[0]
-    if (file && file.name.endsWith('.pdf')) {
-      onUploadPDF(file)
+    if (file) {
+      if (file.name.endsWith('.pdf')) {
+        onUploadPDF(file)
+      } else if (file.type.startsWith('image/')) {
+        handleImageFile(file)
+      }
     }
   }
 
-  const hasValue = value.trim().length > 0
+  const hasValue = value.trim().length > 0 || images.length > 0
 
   return (
     <div
@@ -60,27 +114,48 @@ const ChatInput = forwardRef(function ChatInput({ onSend, disabled, useRag, setU
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {/* Drag overlay */}
+      {/* Drag overlay indicator */}
       {isDragOver && (
         <div style={{
-          position: 'fixed', inset: 0, zIndex: 100,
-          background: 'rgba(212,132,94,0.05)',
-          border: '3px dashed rgba(212,132,94,0.3)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          pointerEvents: 'none',
+          maxWidth: 'var(--content-max-width, 780px)',
+          width: '100%', marginBottom: 12, padding: '16px',
+          borderRadius: 16, border: '2px dashed #d4845e',
+          background: 'rgba(212,132,94,0.08)',
+          textAlign: 'center', color: '#d4845e', fontSize: 14, fontWeight: 500,
+          animation: 'fadeIn 0.2s ease',
         }}>
-          <div style={{
-            background: 'rgba(22,22,22,0.95)', borderRadius: 20, padding: '32px 48px',
-            textAlign: 'center', boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
-          }}>
-            <div style={{ fontSize: 40, marginBottom: 12 }}>📄</div>
-            <div style={{ color: '#d4845e', fontSize: 16, fontWeight: 600, fontFamily: 'Outfit' }}>
-              Drop PDF to upload
+          📥 Drop PDF or Image here to upload
+        </div>
+      )}
+
+      {/* Attached Images Preview Area */}
+      {images.length > 0 && (
+        <div style={{
+          maxWidth: 'var(--content-max-width, 780px)',
+          width: '100%', marginBottom: 10,
+          display: 'flex', gap: 10, flexWrap: 'wrap',
+        }}>
+          {images.map((img, idx) => (
+            <div key={idx} style={{
+              position: 'relative', width: 64, height: 64, borderRadius: 10,
+              overflow: 'hidden', border: '1px solid rgba(255,255,255,0.15)',
+              background: '#1a1a1a',
+            }}>
+              <img src={img.url} alt={img.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              <button
+                onClick={() => removeImage(idx)}
+                style={{
+                  position: 'absolute', top: 2, right: 2,
+                  background: 'rgba(0,0,0,0.7)', border: 'none',
+                  color: '#fff', borderRadius: '50%', width: 18, height: 18,
+                  fontSize: 12, cursor: 'pointer', display: 'flex',
+                  alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                ×
+              </button>
             </div>
-            <div style={{ color: '#666', fontSize: 13, marginTop: 4 }}>
-              File will be ingested into the knowledge base
-            </div>
-          </div>
+          ))}
         </div>
       )}
 
@@ -88,7 +163,7 @@ const ChatInput = forwardRef(function ChatInput({ onSend, disabled, useRag, setU
       <div style={{
         maxWidth: 'var(--content-max-width, 780px)',
         width: '100%', marginBottom: 10,
-        display: 'flex', gap: 6, alignItems: 'center',
+        display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap'
       }}>
         <button
           onClick={() => setUseRag(!useRag)}
@@ -103,6 +178,7 @@ const ChatInput = forwardRef(function ChatInput({ onSend, disabled, useRag, setU
         >
           📎 {useRag ? 'RAG: ON' : 'RAG'}
         </button>
+
         <label style={{
           fontSize: 12, padding: '5px 12px', borderRadius: 20,
           border: '1px solid rgba(255,255,255,0.06)',
@@ -114,10 +190,63 @@ const ChatInput = forwardRef(function ChatInput({ onSend, disabled, useRag, setU
           onMouseEnter={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'}
           onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)'}
         >
-          📄 Upload PDF
+          📄 PDF
           <input type="file" accept=".pdf" style={{ display: 'none' }}
             onChange={e => e.target.files[0] && onUploadPDF(e.target.files[0])} />
         </label>
+
+        <label style={{
+          fontSize: 12, padding: '5px 12px', borderRadius: 20,
+          border: '1px solid rgba(255,255,255,0.06)',
+          color: '#777', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', gap: 5,
+          background: 'rgba(255,255,255,0.03)',
+          transition: 'all 0.25s ease', fontWeight: 500,
+        }}
+          onMouseEnter={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'}
+          onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)'}
+        >
+          🖼️ Image
+          <input type="file" accept="image/*" style={{ display: 'none' }}
+            onChange={e => e.target.files[0] && handleImageFile(e.target.files[0])} />
+        </label>
+
+        <button
+          onClick={toggleListening}
+          title={isListening ? "Stop listening" : "Voice input (Dictation)"}
+          style={{
+            fontSize: 12, padding: '5px 12px', borderRadius: 20,
+            background: isListening ? 'rgba(248,113,113,0.15)' : 'rgba(255,255,255,0.03)',
+            border: `1px solid ${isListening ? 'rgba(248,113,113,0.3)' : 'rgba(255,255,255,0.06)'}`,
+            color: isListening ? '#f87171' : '#777',
+            cursor: 'pointer', transition: 'all 0.25s ease',
+            fontWeight: 500, display: 'flex', alignItems: 'center', gap: 5,
+            animation: isListening ? 'pulse 1.5s infinite' : 'none',
+          }}
+        >
+          🎙️ {isListening ? 'Listening...' : 'Voice'}
+        </button>
+
+        <button
+          onClick={() => {
+            setValue(prev => prev ? `Generate an image of ${prev}` : 'Generate an image of a futuristic cyberpunk city with neon lights at night')
+            if (textareaRef.current) textareaRef.current.focus()
+          }}
+          title="Generate AI Image"
+          style={{
+            fontSize: 12, padding: '5px 12px', borderRadius: 20,
+            background: 'rgba(212,132,94,0.08)',
+            border: '1px solid rgba(212,132,94,0.2)',
+            color: '#d4845e',
+            cursor: 'pointer', transition: 'all 0.25s ease',
+            fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5,
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = 'rgba(212,132,94,0.15)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'rgba(212,132,94,0.08)'}
+        >
+          🎨 Draw Image
+        </button>
+
         <div style={{ flex: 1 }} />
         <span style={{
           fontSize: 11, color: value.length > 30000 ? '#f87171' : '#444',

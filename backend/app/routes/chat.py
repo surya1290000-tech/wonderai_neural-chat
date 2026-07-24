@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from pydantic import BaseModel, field_validator
-from typing import Optional
+from typing import Optional, List
 import json
 
 from app.config import settings
@@ -38,6 +38,9 @@ class UpdateSessionRequest(BaseModel):
 class SendMessageRequest(BaseModel):
     content: str
     use_rag: bool = False
+    images: Optional[List[str]] = None
+    max_tokens: Optional[int] = None
+    top_p: Optional[float] = None
     
     @field_validator("content")
     @classmethod
@@ -227,8 +230,11 @@ async def stream_message(
     
     is_first_message = len(all_messages) == 0
     
-    # Save user message
-    user_msg = Message(session_id=session_id, role="user", content=req.content)
+    # Save user message with optional images metadata
+    msg_meta = {}
+    if req.images:
+        msg_meta["images"] = req.images
+    user_msg = Message(session_id=session_id, role="user", content=req.content, meta=msg_meta if msg_meta else None)
     db.add(user_msg)
     await db.commit()
 
@@ -245,6 +251,9 @@ async def stream_message(
         async for chunk in ai_service.stream(
             history=history,
             user_message=req.content,
+            images=req.images,
+            max_tokens=req.max_tokens,
+            top_p=req.top_p,
             model=session.model,
             temperature=session.temperature,
             mode=session.mode,

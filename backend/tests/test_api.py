@@ -91,7 +91,7 @@ class TestHealthCheck:
         resp = await client.get("/")
         assert resp.status_code == 200
         assert resp.json()["message"] == "Wonder AI API is running"
-        assert resp.json()["version"] == "2.0.0"
+        assert resp.json()["version"] == "3.0.0"
 
     @pytest.mark.anyio
     async def test_health(self, client):

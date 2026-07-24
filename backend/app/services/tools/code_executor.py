@@ -78,14 +78,16 @@ SAFE_MODULES = {
 # Dangerous patterns to block
 BLOCKED_PATTERNS = [
     "import os", "import sys", "import subprocess", "import shutil",
-    "import socket", "import http", "import urllib",
-    "__import__", "exec(", "eval(",
+    "import socket", "import http", "import urllib", "import pty",
+    "__import__", "exec(", "eval(", "exec ",
     "open(", "file(", "input(",
     "os.system", "os.popen", "os.exec",
     "subprocess.", "shutil.", "socket.",
     "__builtins__", "__globals__", "__subclasses__",
+    "__class__", "__bases__", "__mro__", "__code__", "__closure__",
     "breakpoint(", "compile(",
 ]
+
 
 
 def _safe_import(name, *args, **kwargs):

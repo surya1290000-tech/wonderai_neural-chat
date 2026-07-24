@@ -193,7 +193,7 @@ export default function ChatHeader({ session, onSessionUpdate, onExport, onToggl
           )}
 
           {/* Temperature */}
-          <div>
+          <div style={{ marginBottom: 18 }}>
             <label style={{
               fontSize: 12, color: '#777', display: 'flex',
               justifyContent: 'space-between', marginBottom: 10, fontWeight: 500,
@@ -212,6 +212,34 @@ export default function ChatHeader({ session, onSessionUpdate, onExport, onToggl
             }}>
               <span>Precise</span><span>Balanced</span><span>Creative</span>
             </div>
+          </div>
+
+          {/* Max Tokens */}
+          <div style={{ marginBottom: 18 }}>
+            <label style={{
+              fontSize: 12, color: '#777', display: 'flex',
+              justifyContent: 'space-between', marginBottom: 8, fontWeight: 500,
+            }}>
+              Max Tokens
+              <span style={{ color: '#d4845e', fontFamily: 'JetBrains Mono', fontWeight: 600, fontSize: 13 }}>2048</span>
+            </label>
+            <input type="range" min="512" max="8192" step="256" defaultValue="2048"
+              style={{ width: '100%', accentColor: '#d4845e', height: 4 }}
+            />
+          </div>
+
+          {/* Top-P */}
+          <div>
+            <label style={{
+              fontSize: 12, color: '#777', display: 'flex',
+              justifyContent: 'space-between', marginBottom: 8, fontWeight: 500,
+            }}>
+              Top-P Sampling
+              <span style={{ color: '#d4845e', fontFamily: 'JetBrains Mono', fontWeight: 600, fontSize: 13 }}>0.95</span>
+            </label>
+            <input type="range" min="0.1" max="1.0" step="0.05" defaultValue="0.95"
+              style={{ width: '100%', accentColor: '#d4845e', height: 4 }}
+            />
           </div>
         </div>
       )}

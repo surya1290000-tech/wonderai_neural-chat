@@ -34,10 +34,11 @@ jobs:
           # stop the build if there are Python syntax errors or undefined names
           flake8 backend --count --select=E9,F63,F7,F82 --show-source --statistics
 
-      # Run tests (Uncomment when you have test scripts configured in /tests)
-      # - name: Run Backend Tests
-      #   run: |
-      #     cd backend && pytest
+      - name: Run Backend Tests
+        run: |
+          pip install pytest-asyncio anyio
+          cd backend && pytest
+
 
   # JOB 2: Build & Verify Docker Containers
   docker-build-verify:

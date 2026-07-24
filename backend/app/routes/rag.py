@@ -5,9 +5,11 @@ Documents are scoped to individual chat sessions.
 
 import os
 import shutil
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query, Form
+from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from pydantic import BaseModel
 from app.config import settings
 from app.database import get_db
 from app.services.rag_service import rag_service
@@ -39,25 +41,30 @@ async def _verify_session_ownership(
 
 @router.post("/upload")
 async def upload_document(
-    session_id: str = Query(..., description="Chat session to attach document to"),
+    session_id: Optional[str] = Form(None),
+    query_session_id: Optional[str] = Query(None, alias="session_id"),
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Upload a document and ingest it into the session's FAISS vector store"""
-    await _verify_session_ownership(session_id, current_user, db)
+    target_session_id = session_id or query_session_id
+    if not target_session_id:
+        raise HTTPException(status_code=400, detail="session_id is required as a query parameter or form field")
+
+    await _verify_session_ownership(target_session_id, current_user, db)
 
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"Unsupported file type. Allowed: {', '.join(ALLOWED_EXTENSIONS)}")
     
     # Save file to disk temporarily
-    file_path = os.path.join(settings.UPLOAD_DIR, f"{session_id}_{file.filename}")
+    file_path = os.path.join(settings.UPLOAD_DIR, f"{target_session_id}_{file.filename}")
     with open(file_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
     
     # Ingest into RAG pipeline
-    result = await rag_service.ingest_document(session_id, file_path, file.filename)
+    result = await rag_service.ingest_document(target_session_id, file_path, file.filename)
     
     # Clean up file after ingestion
     if os.path.exists(file_path):
@@ -67,7 +74,7 @@ async def upload_document(
     if "error" not in result:
         doc = SessionDocument(
             id=result["document_id"],
-            session_id=session_id,
+            session_id=target_session_id,
             filename=file.filename,
             chunk_count=result["chunks"],
         )
@@ -138,3 +145,71 @@ async def query_rag(
     text = query.get("text", "")
     context, sources = rag_service.retrieve(session_id, text)
     return {"context": context, "sources": sources}
+
+
+class IngestUrlRequest(BaseModel):
+    url: str
+
+
+@router.post("/ingest-url")
+async def ingest_url(
+    req: IngestUrlRequest,
+    session_id: str = Query(..., description="Chat session to attach URL content to"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Scrape a webpage URL and ingest its content into the session's vector store"""
+    await _verify_session_ownership(session_id, current_user, db)
+    
+    import httpx
+    import re
+    from bs4 import BeautifulSoup
+    
+    url = req.url.strip()
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) WonderAI/1.0"})
+            resp.raise_for_status()
+            html = resp.text
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch URL: {str(e)}")
+
+    soup = BeautifulSoup(html, "html.parser")
+    for s in soup(["script", "style", "nav", "footer", "header", "noscript", "svg"]):
+        s.extract()
+    
+    text = soup.get_text(separator="\n")
+    lines = (line.strip() for line in text.splitlines())
+    chunks_clean = (phrase.strip() for line in lines for phrase in line.split("  "))
+    clean_text = "\n".join(chunk for chunk in chunks_clean if chunk)
+    
+    if len(clean_text) < 30:
+        raise HTTPException(status_code=400, detail="Could not extract meaningful text from URL")
+
+    # Clean display name
+    domain_name = url.replace("https://", "").replace("http://", "").split("/")[0]
+    doc_label = f"Web: {domain_name}"
+
+    temp_filename = f"url_{re.sub(r'[^a-zA-Z0-9]', '_', url)[:25]}.txt"
+    file_path = os.path.join(settings.UPLOAD_DIR, f"{session_id}_{temp_filename}")
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(f"Source Web URL: {url}\n\n" + clean_text)
+        
+    result = await rag_service.ingest_document(session_id, file_path, doc_label)
+    if os.path.exists(file_path):
+        os.remove(file_path)
+
+    if "error" not in result:
+        doc = SessionDocument(
+            id=result["document_id"],
+            session_id=session_id,
+            filename=doc_label,
+            chunk_count=result["chunks"],
+        )
+        db.add(doc)
+        await db.commit()
+
+    return result

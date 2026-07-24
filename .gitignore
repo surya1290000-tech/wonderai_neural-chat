@@ -8,3 +8,7 @@ backend/venv/
 frontend/node_modules/
 .DS_Store
 *.db
+backend/data/
+backend/test_upload.txt
+test.txt
+test_doc.txt

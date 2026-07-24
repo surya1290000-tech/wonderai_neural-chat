@@ -249,7 +249,93 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 /* ─── Mobile Responsive ──────────────────────────── */
 @media (max-width: 768px) {
-  :root {
-    --content-max-width: 100%;
+  .chat-page {
+    flex-direction: column;
   }
+}
+
+/* ─── ChatGPT Style Image Creation Animation ──────── */
+@keyframes chatgptGlowPulse {
+  0% {
+    box-shadow: 0 0 15px rgba(212, 132, 94, 0.15), inset 0 0 20px rgba(212, 132, 94, 0.05);
+    border-color: rgba(212, 132, 94, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 35px rgba(212, 132, 94, 0.35), inset 0 0 40px rgba(212, 132, 94, 0.15);
+    border-color: rgba(212, 132, 94, 0.6);
+  }
+  100% {
+    box-shadow: 0 0 15px rgba(212, 132, 94, 0.15), inset 0 0 20px rgba(212, 132, 94, 0.05);
+    border-color: rgba(212, 132, 94, 0.3);
+  }
+}
+
+@keyframes chatgptShimmerWave {
+  0% {
+    transform: translateX(-100%) rotate(25deg);
+  }
+  100% {
+    transform: translateX(200%) rotate(25deg);
+  }
+}
+
+@keyframes chatgptSpin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes chatgptSparklePulse {
+  0%, 100% {
+    transform: scale(0.9) rotate(0deg);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.2) rotate(180deg);
+    opacity: 1;
+  }
+}
+
+@keyframes chatgptImageReveal {
+  0% {
+    filter: blur(20px) scale(0.96);
+    opacity: 0;
+  }
+  100% {
+    filter: blur(0px) scale(1);
+    opacity: 1;
+  }
+}
+
+.chatgpt-image-container {
+  transition: all 0.5s ease;
+}
+
+.chatgpt-image-generating {
+  animation: chatgptGlowPulse 2.5s infinite ease-in-out;
+}
+
+.chatgpt-shimmer-beam {
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.02) 40%,
+    rgba(212, 132, 94, 0.18) 50%,
+    rgba(255, 255, 255, 0.02) 60%,
+    transparent 100%
+  );
+  animation: chatgptShimmerWave 2.8s infinite cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+}
+
+.chatgpt-image-loaded {
+  animation: chatgptImageReveal 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }

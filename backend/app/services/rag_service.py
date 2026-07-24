@@ -25,7 +25,7 @@ def get_sentence_transformer():
     global _sentence_transformer
     if _sentence_transformer is None:
         from sentence_transformers import SentenceTransformer
-        _sentence_transformer = SentenceTransformer(settings.EMBEDDING_MODEL)
+        _sentence_transformer = SentenceTransformer(settings.EMBEDDING_MODEL, device="cpu")
     return _sentence_transformer
 
 def get_faiss():
@@ -129,57 +129,133 @@ class RAGService:
                 self._stores[session_id] = SessionVectorStore(str(session_id))
             return self._stores[session_id]
 
-    def _chunk_text(self, text: str, source: str, document_id: str) -> List[dict]:
-        words = text.split()
-        chunks = []
-        step = settings.CHUNK_SIZE - settings.CHUNK_OVERLAP
+    def _chunk_text(self, text: str, source: str, document_id: str, page_map: dict = None) -> List[dict]:
+        """
+        Sentence-boundary-aware chunking with overlap.
+        page_map: dict mapping character offset ranges to page numbers (optional).
+        """
+        import re
+        # Split on sentence boundaries: period+space, double newline, or single newline followed by uppercase
+        sentences = re.split(r'(?<=[.!?])\s+|\n{2,}', text)
+        sentences = [s.strip() for s in sentences if s.strip()]
         
-        for i in range(0, len(words), step):
-            chunk_words = words[i:i + settings.CHUNK_SIZE]
-            chunk_text = " ".join(chunk_words)
-            if len(chunk_text.strip()) > 50:
+        chunks = []
+        current_words = []
+        current_char_offset = 0
+        chunk_start_offset = 0
+        
+        for sentence in sentences:
+            sentence_words = sentence.split()
+            
+            # If adding this sentence would exceed chunk size, finalize current chunk
+            if len(current_words) + len(sentence_words) > settings.CHUNK_SIZE and current_words:
+                chunk_text = " ".join(current_words)
+                if len(chunk_text) > 30:  # Minimum quality filter
+                    page_num = self._get_page_for_offset(page_map, chunk_start_offset) if page_map else None
+                    chunks.append({
+                        "id": str(uuid.uuid4()),
+                        "document_id": document_id,
+                        "text": chunk_text,
+                        "source": source,
+                        "chunk_index": len(chunks),
+                        "page": page_num,
+                    })
+                
+                # Keep overlap words from the end of the current chunk
+                overlap_words = current_words[-settings.CHUNK_OVERLAP:] if len(current_words) > settings.CHUNK_OVERLAP else current_words[:]
+                current_words = overlap_words
+                chunk_start_offset = current_char_offset - len(" ".join(overlap_words))
+            
+            current_words.extend(sentence_words)
+            current_char_offset += len(sentence) + 1  # +1 for the space/newline
+        
+        # Final chunk
+        if current_words:
+            chunk_text = " ".join(current_words)
+            if len(chunk_text) > 30:
+                page_num = self._get_page_for_offset(page_map, chunk_start_offset) if page_map else None
                 chunks.append({
                     "id": str(uuid.uuid4()),
                     "document_id": document_id,
                     "text": chunk_text,
                     "source": source,
-                    "chunk_index": len(chunks)
+                    "chunk_index": len(chunks),
+                    "page": page_num,
                 })
-        return chunks
         
-    def _extract_text(self, file_path: str, filename: str) -> str:
+        return chunks
+    
+    def _get_page_for_offset(self, page_map: dict, offset: int) -> Optional[int]:
+        """Find which page a character offset belongs to."""
+        if not page_map:
+            return None
+        for (start, end), page_num in page_map.items():
+            if start <= offset < end:
+                return page_num
+        return None
+        
+    def _extract_text(self, file_path: str, filename: str) -> Tuple[str, dict]:
+        """
+        Extract text from a file. Returns (full_text, page_map).
+        page_map maps (char_start, char_end) -> page_number for PDFs.
+        """
         ext = filename.lower().split('.')[-1]
         full_text = ""
+        page_map = {}
         
         if ext == 'pdf':
             import pdfplumber
             with pdfplumber.open(file_path) as pdf:
-                for page in pdf.pages:
-                    page_text = page.extract_text()
-                    if page_text:
-                        full_text += page_text + "\n"
-        elif ext in ['txt', 'md']:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                full_text = f.read()
+                for page_idx, page in enumerate(pdf.pages, start=1):
+                    char_start = len(full_text)
+                    
+                    # Extract regular text
+                    page_text = page.extract_text() or ""
+                    
+                    # Extract tables as markdown for structured data
+                    tables = page.extract_tables()
+                    table_text = ""
+                    if tables:
+                        for table in tables:
+                            if not table or not table[0]:
+                                continue
+                            # Convert table rows to markdown
+                            headers = table[0]
+                            table_text += "\n\n| " + " | ".join(str(h or "") for h in headers) + " |\n"
+                            table_text += "| " + " | ".join("---" for _ in headers) + " |\n"
+                            for row in table[1:]:
+                                table_text += "| " + " | ".join(str(cell or "") for cell in row) + " |\n"
+                    
+                    page_content = f"[Page {page_idx}]\n{page_text}{table_text}\n\n"
+                    full_text += page_content
+                    
+                    char_end = len(full_text)
+                    page_map[(char_start, char_end)] = page_idx
+                    
         elif ext == 'docx':
             import docx
             doc = docx.Document(file_path)
             full_text = "\n".join([p.text for p in doc.paragraphs])
+        else:
+            # Fallback for plain text, markdown, scraped web files
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                full_text = f.read()
             
-        return full_text
+        return full_text, page_map
 
     async def ingest_document(self, session_id: str, file_path: str, filename: str) -> dict:
-        """Extract text, chunk, and ingest into the session's vector store."""
-        full_text = self._extract_text(file_path, filename)
+        """Extract text, chunk, and ingest into the session's vector store asynchronously."""
+        import asyncio
+        full_text, page_map = await asyncio.to_thread(self._extract_text, file_path, filename)
         
         if not full_text.strip():
             return {"error": "Could not extract text from document", "chunks": 0}
         
         document_id = str(uuid.uuid4())
-        new_chunks = self._chunk_text(full_text, filename, document_id)
+        new_chunks = self._chunk_text(full_text, filename, document_id, page_map)
         
         store = self._get_store(session_id)
-        store.add_document(new_chunks)
+        await asyncio.to_thread(store.add_document, new_chunks)
         
         return {
             "message": f"Ingested {filename}",
@@ -187,6 +263,7 @@ class RAGService:
             "chunks": len(new_chunks),
             "total_chunks": len(store.chunks)
         }
+
 
     def retrieve(self, session_id: str, query: str, top_k: int = None) -> Tuple[str, List[str]]:
         store = self._get_store(session_id)
@@ -204,13 +281,31 @@ class RAGService:
         retrieved = []
         sources = []
         for score, idx in zip(scores[0], indices[0]):
-            if idx >= 0 and score > 0.3:  # Threshold
+            if idx >= 0 and score > 0.15:  # Lower threshold for better recall
                 chunk = store.chunks[idx]
-                retrieved.append(f"[Source: {chunk['source']}]\n{chunk['text']}")
-                sources.append(chunk["source"])
+                page_ref = f" (Page {chunk['page']})" if chunk.get('page') else ""
+                retrieved.append(
+                    f"[Source: {chunk['source']}{page_ref} | Relevance: {score:.2f}]\n{chunk['text']}"
+                )
+                source_label = f"{chunk['source']}{page_ref}"
+                if source_label not in sources:
+                    sources.append(source_label)
+
+        # Fallback: if query was a generic/meta question (e.g. "i uploaded pdf", "read my resume") and no chunks met threshold,
+        # return top chunks so the model always receives document context when documents exist
+        if not retrieved and store.chunks:
+            for idx in range(min(top_k, len(store.chunks))):
+                chunk = store.chunks[idx]
+                page_ref = f" (Page {chunk['page']})" if chunk.get('page') else ""
+                retrieved.append(
+                    f"[Source: {chunk['source']}{page_ref}]\n{chunk['text']}"
+                )
+                source_label = f"{chunk['source']}{page_ref}"
+                if source_label not in sources:
+                    sources.append(source_label)
         
         context = "\n\n---\n\n".join(retrieved)
-        return context, list(set(sources))
+        return context, sources
 
     def delete_document(self, session_id: str, document_id: str) -> bool:
         store = self._get_store(session_id)

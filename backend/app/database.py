@@ -36,11 +36,25 @@ class Base(DeclarativeBase):
     pass
 
 
+def _auto_migrate(connection):
+    from sqlalchemy import inspect, text
+    inspector = inspect(connection)
+    if inspector.has_table("users"):
+        existing_cols = {col["name"] for col in inspector.get_columns("users")}
+        if "full_name" not in existing_cols:
+            connection.execute(text("ALTER TABLE users ADD COLUMN full_name VARCHAR"))
+        if "avatar_url" not in existing_cols:
+            connection.execute(text("ALTER TABLE users ADD COLUMN avatar_url VARCHAR"))
+        if "updated_at" not in existing_cols:
+            connection.execute(text("ALTER TABLE users ADD COLUMN updated_at DATETIME"))
+
+
 async def init_db():
-    """Create all tables on startup"""
+    """Create all tables on startup and apply migrations"""
     async with engine.begin() as conn:
         from app.models import user, chat, session_document  # noqa: import models to register them
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_auto_migrate)
 
 
 async def get_db():

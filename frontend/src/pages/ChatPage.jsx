@@ -4,6 +4,7 @@ import ChatHeader from '../components/ChatHeader'
 import MessageBubble from '../components/MessageBubble'
 import ChatInput from '../components/ChatInput'
 import KnowledgePanel from '../components/KnowledgePanel'
+import ArtifactsPanel from '../components/ArtifactsPanel'
 import { chatAPI, streamMessage, ragAPI, modelsAPI } from '../utils/api'
 import { useAuth } from '../context/AuthContext'
 
@@ -115,6 +116,8 @@ export default function ChatPage() {
   const [defaultModel, setDefaultModel] = useState('mistral')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [kbOpen, setKbOpen] = useState(false)
+  const [kbRefresh, setKbRefresh] = useState(0)
+  const [activeArtifact, setActiveArtifact] = useState(null)
   const bottomRef = useRef()
   const abortRef = useRef(null)
   const inputRef = useRef(null)
@@ -221,11 +224,11 @@ export default function ChatPage() {
     } catch (e) { console.error('Failed to save feedback:', e) }
   }, [activeSessionId])
 
-  const handleSend = useCallback(async (content) => {
+  const handleSend = useCallback(async (content, images = null) => {
     if (streaming) return
 
     // Slash commands
-    if (content.startsWith('/')) {
+    if (content && content.startsWith('/')) {
       const cmd = content.toLowerCase().trim()
       if (cmd === '/clear') {
         setMessages([])
@@ -270,7 +273,7 @@ export default function ChatPage() {
       } catch (e) { showNotif('Failed to create session', 'error'); return }
     }
 
-    const userMsg = { id: Date.now().toString(), role: 'user', content, created_at: new Date().toISOString() }
+    const userMsg = { id: Date.now().toString(), role: 'user', content, meta: { images }, created_at: new Date().toISOString() }
     setMessages(prev => [...prev, userMsg])
 
     const aiMsgId = Date.now().toString() + '-ai'
@@ -310,7 +313,8 @@ export default function ChatPage() {
         ))
         showNotif('AI provider error — check your backend configuration', 'error')
       },
-      controller.signal
+      controller.signal,
+      { images }
     )
   }, [activeSessionId, activeSession, streaming, useRag, defaultModel])
 
@@ -355,7 +359,9 @@ export default function ChatPage() {
     try {
       showNotif('Uploading PDF...', 'info')
       await ragAPI.upload(file, sessionId)
-      showNotif(`✓ "${file.name}" ingested into knowledge base. Enable RAG to use it.`)
+      setUseRag(true)  // Auto-enable RAG after successful document upload
+      showNotif(`✓ "${file.name}" ingested. RAG mode auto-enabled — ask questions about it!`)
+      setKbRefresh(prev => prev + 1) // Trigger KB panel update
     } catch (e) {
       showNotif('Failed to upload PDF', 'error')
     }
@@ -417,6 +423,7 @@ export default function ChatPage() {
                   isStreaming={streaming && i === messages.length - 1 && msg.role === 'assistant'}
                   onRegenerate={handleRegenerate}
                   onFeedback={handleFeedback}
+                  onOpenArtifact={(art) => setActiveArtifact(art)}
                 />
               </div>
             ))}
@@ -467,6 +474,12 @@ export default function ChatPage() {
         />
       </div>
 
+      {/* Artifacts Side Panel */}
+      <ArtifactsPanel
+        artifact={activeArtifact}
+        onClose={() => setActiveArtifact(null)}
+      />
+
       {/* Notification toast */}
       {notification && (
         <div style={{
@@ -492,6 +505,7 @@ export default function ChatPage() {
         onUploadDocument={handleUploadPDF}
         showNotif={showNotif}
         sessionId={activeSessionId}
+        refreshTrigger={kbRefresh}
       />
     </div>
   )
