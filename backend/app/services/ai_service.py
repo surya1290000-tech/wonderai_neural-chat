@@ -57,7 +57,8 @@ class AIService:
         mode: str = "default",
         system_prompt: Optional[str] = None,
         rag_context: Optional[str] = None,
-        enable_tools: bool = True
+        enable_tools: bool = True,
+        tools_whitelist: Optional[List[str]] = None
     ) -> List[Dict]:
         """Build the message array including system prompt, RAG context, tool descriptions, and history"""
         
@@ -88,9 +89,20 @@ class AIService:
         
         # Tools: Inject tool descriptions into system prompt
         if enable_tools:
-            tool_desc = tool_registry.get_tool_descriptions()
+            tool_desc = tool_registry.get_tool_descriptions(whitelist=tools_whitelist)
             if tool_desc:
                 sys_prompt += f"\n\n{tool_desc}"
+            # Citation instructions for web search
+            sys_prompt += (
+                "\n\n## WEB SEARCH CITATION RULES\n"
+                "When you use the web_search tool and receive results, you MUST:\n"
+                "1. Cite sources inline using numbered references like [1], [2], [3] etc.\n"
+                "2. Place citation numbers immediately after the claim they support.\n"
+                "3. Be concise and synthesize information across multiple sources.\n"
+                "4. At the end of your response, do NOT repeat a sources list — the frontend renders source cards automatically.\n"
+                "5. If a query is about current events, news, latest updates, prices, scores, or real-time data, "
+                "you MUST use the web_search tool to provide accurate, up-to-date information.\n"
+            )
         
         messages = [{"role": "system", "content": sys_prompt}]
         messages.extend(history)
@@ -126,7 +138,8 @@ class AIService:
         temperature: float = 0.7,
         mode: str = "default",
         system_prompt: Optional[str] = None,
-        rag_context: Optional[str] = None
+        rag_context: Optional[str] = None,
+        tools_whitelist: Optional[List[str]] = None
     ) -> AsyncGenerator[str, None]:
         """Stream response from OpenAI API with tool support"""
         
@@ -189,7 +202,8 @@ class AIService:
         temperature: float = 0.7,
         mode: str = "default",
         system_prompt: Optional[str] = None,
-        rag_context: Optional[str] = None
+        rag_context: Optional[str] = None,
+        tools_whitelist: Optional[List[str]] = None
     ) -> AsyncGenerator[str, None]:
         """Stream response from Ollama with tool support"""
         
@@ -270,7 +284,8 @@ class AIService:
         temperature: float = 0.7,
         mode: str = "default",
         system_prompt: Optional[str] = None,
-        rag_context: Optional[str] = None
+        rag_context: Optional[str] = None,
+        tools_whitelist: Optional[List[str]] = None
     ) -> AsyncGenerator[str, None]:
         """Stream response from Google Gemini via google-genai SDK with multimodal vision and tool support"""
         
@@ -305,7 +320,7 @@ class AIService:
             )
         
         # Add tool descriptions
-        tool_desc = tool_registry.get_tool_descriptions()
+        tool_desc = tool_registry.get_tool_descriptions(whitelist=tools_whitelist)
         if tool_desc:
             sys_prompt += f"\n\n{tool_desc}"
         
@@ -413,16 +428,35 @@ class AIService:
                         if md:
                             img_content = "\n\n" + md
                             yield f"data: {json.dumps({'content': img_content, 'done': False})}\n\n"
+                    # If web_search, emit sources metadata for frontend citation cards
+                    if result.get("tool") == "web_search" and isinstance(result.get("result"), dict):
+                        sources = result["result"].get("sources", [])
+                        if sources:
+                            yield f"data: {json.dumps({'web_sources': sources, 'done': False})}\n\n"
                 
                 # If tool was generate_image, image card is already emitted; skip redundant follow-up call
                 has_image_tool = any(r.get("tool") == "generate_image" for r in tool_results)
                 if not has_image_tool:
                     contents.append(types.Content(role="model", parts=[types.Part.from_text(text=accumulated)]))
-                    tool_context = "\n\n".join([
-                        f"Tool '{r['tool']}' returned:\n{json.dumps(r.get('result', r.get('error', '')), indent=2)}"
-                        for r in tool_results
-                    ])
-                    contents.append(types.Content(role="user", parts=[types.Part.from_text(text=f"Here are the tool results. Use them to provide a complete answer. Do NOT call any more tools.\n\n{tool_context}")]))
+                    
+                    # For web_search: use rich context (scraped page content) instead of raw JSON
+                    tool_context_parts = []
+                    for r in tool_results:
+                        if r.get("tool") == "web_search" and isinstance(r.get("result"), dict):
+                            tool_context_parts.append(r["result"].get("context", r["result"].get("summary", "")))
+                        else:
+                            tool_context_parts.append(
+                                f"Tool '{r['tool']}' returned:\n{json.dumps(r.get('result', r.get('error', '')), indent=2)}"
+                            )
+                    tool_context = "\n\n".join(tool_context_parts)
+                    
+                    follow_up_instruction = (
+                        "Here are the tool results. Use them to provide a complete, well-cited answer. "
+                        "Cite sources using inline numbers [1], [2], [3] etc. "
+                        "Do NOT call any more tools. Do NOT repeat a sources list at the end.\n\n"
+                        f"{tool_context}"
+                    )
+                    contents.append(types.Content(role="user", parts=[types.Part.from_text(text=follow_up_instruction)]))
                     
                     try:
                         follow_up = await self.gemini_client.aio.models.generate_content_stream(

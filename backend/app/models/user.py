@@ -20,6 +20,7 @@ class User(Base):
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
     sessions = relationship("ChatSession", back_populates="user", cascade="all, delete-orphan")
+    agents = relationship("Agent", back_populates="user", cascade="all, delete-orphan")
 
 class EmailOTP(Base):
     __tablename__ = "email_otps"

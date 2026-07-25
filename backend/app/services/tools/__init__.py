@@ -42,9 +42,18 @@ class ToolRegistry:
     def list_tools(self) -> List[Tool]:
         return list(self._tools.values())
     
-    def get_tool_descriptions(self) -> str:
-        """Generate a text description of all tools for the system prompt."""
+    def get_tool_descriptions(self, whitelist: Optional[list] = None) -> str:
+        """Generate a text description of all (or whitelisted) tools for the system prompt."""
         if not self._tools:
+            return ""
+        
+        # Filter tools by whitelist if provided
+        if whitelist and whitelist != ["*"]:
+            tools = [t for t in self._tools.values() if t.name in whitelist]
+        else:
+            tools = list(self._tools.values())
+        
+        if not tools:
             return ""
         
         lines = ["You have access to the following tools. To use a tool, respond with a JSON block in this exact format:",
@@ -59,7 +68,7 @@ class ToolRegistry:
                  "Available tools:",
                  ""]
         
-        for tool in self._tools.values():
+        for tool in tools:
             param_desc = ""
             if tool.parameters:
                 params = []

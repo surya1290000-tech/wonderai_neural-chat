@@ -5,7 +5,9 @@ import MessageBubble from '../components/MessageBubble'
 import ChatInput from '../components/ChatInput'
 import KnowledgePanel from '../components/KnowledgePanel'
 import ArtifactsPanel from '../components/ArtifactsPanel'
-import { chatAPI, streamMessage, ragAPI, modelsAPI } from '../utils/api'
+import AgentBuilderModal from '../components/AgentBuilderModal'
+import AgentSelector from '../components/AgentSelector'
+import { chatAPI, streamMessage, ragAPI, modelsAPI, agentsAPI } from '../utils/api'
 import { useAuth } from '../context/AuthContext'
 
 const SUGGESTIONS = [
@@ -15,9 +17,11 @@ const SUGGESTIONS = [
   { icon: '🚀', label: 'Plan a side project', desc: 'from idea to launch' },
 ]
 
-function WelcomeScreen({ username, onSuggestionClick }) {
+function WelcomeScreen({ username, selectedAgent, onSuggestionClick, onOpenAgents }) {
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
+
+  const customStarters = selectedAgent?.conversation_starters?.filter(s => s.trim()) || []
 
   return (
     <div style={{
@@ -25,80 +29,151 @@ function WelcomeScreen({ username, onSuggestionClick }) {
       alignItems: 'center', justifyContent: 'center',
       padding: '40px 24px', animation: 'fadeIn 0.6s ease',
     }}>
-      <div style={{ textAlign: 'center', marginBottom: 48 }}>
-        <h1 style={{
-          fontFamily: 'Outfit', fontSize: 42, fontWeight: 700,
-          margin: 0, marginBottom: 8, letterSpacing: '-0.03em',
-          background: 'linear-gradient(135deg, #d4845e 0%, #e8b89a 50%, #d4845e 100%)',
-          backgroundSize: '200% auto',
-          WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-          animation: 'shimmer 4s linear infinite',
-        }}>
-          {greeting}, {username || 'there'}
-        </h1>
-        <p style={{
-          color: '#666', fontSize: 17, margin: 0, fontWeight: 400,
-          fontFamily: 'Inter',
-        }}>
-          How can I help you today?
-        </p>
+      <div style={{ textAlign: 'center', marginBottom: 40, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        {selectedAgent ? (
+          <>
+            <div style={{
+              width: 72, height: 72, borderRadius: 20,
+              background: `linear-gradient(135deg, ${selectedAgent.avatar_color || '#d4845e'}, ${selectedAgent.avatar_color || '#d4845e'}88)`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 38, marginBottom: 16,
+              boxShadow: `0 10px 30px ${selectedAgent.avatar_color || '#d4845e'}44`,
+            }}>
+              {selectedAgent.avatar_emoji || '🤖'}
+            </div>
+            <h1 style={{
+              fontFamily: 'Outfit', fontSize: 36, fontWeight: 700,
+              margin: 0, marginBottom: 8, color: '#f0f0f0',
+            }}>
+              {selectedAgent.name}
+            </h1>
+            <p style={{
+              color: '#888', fontSize: 15, margin: 0, maxWidth: 480,
+              lineHeight: 1.6, fontFamily: 'Inter',
+            }}>
+              {selectedAgent.welcome_message || selectedAgent.description || 'Custom AI persona ready to assist you.'}
+            </p>
+          </>
+        ) : (
+          <>
+            <h1 style={{
+              fontFamily: 'Outfit', fontSize: 42, fontWeight: 700,
+              margin: 0, marginBottom: 8, letterSpacing: '-0.03em',
+              background: 'linear-gradient(135deg, #d4845e 0%, #e8b89a 50%, #d4845e 100%)',
+              backgroundSize: '200% auto',
+              WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+              animation: 'shimmer 4s linear infinite',
+            }}>
+              {greeting}, {username || 'there'}
+            </h1>
+            <p style={{
+              color: '#666', fontSize: 17, margin: 0, fontWeight: 400,
+              fontFamily: 'Inter',
+            }}>
+              How can I help you today?
+            </p>
+          </>
+        )}
       </div>
 
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(2, 1fr)',
-        gap: 12, maxWidth: 560, width: '100%',
-      }}>
-        {SUGGESTIONS.map((s, i) => (
-          <button
-            key={i}
-            onClick={() => onSuggestionClick(s.label + ' ' + s.desc)}
-            style={{
-              background: 'rgba(255,255,255,0.025)',
-              border: '1px solid rgba(255,255,255,0.06)',
-              borderRadius: 16, padding: '18px 20px',
-              textAlign: 'left', cursor: 'pointer',
-              transition: 'all 0.3s cubic-bezier(0.25,0.46,0.45,0.94)',
-              animation: `fadeInUp 0.5s ease ${i * 0.08}s both`,
-              position: 'relative', overflow: 'hidden',
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.background = 'rgba(212,132,94,0.06)'
-              e.currentTarget.style.borderColor = 'rgba(212,132,94,0.2)'
-              e.currentTarget.style.transform = 'translateY(-2px)'
-              e.currentTarget.style.boxShadow = '0 8px 30px rgba(0,0,0,0.2)'
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.background = 'rgba(255,255,255,0.025)'
-              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)'
-              e.currentTarget.style.transform = 'translateY(0)'
-              e.currentTarget.style.boxShadow = 'none'
-            }}
-          >
-            <div style={{ fontSize: 22, marginBottom: 10 }}>{s.icon}</div>
-            <div style={{
-              fontSize: 14, fontWeight: 600, color: '#ccc',
-              marginBottom: 4, fontFamily: 'Outfit',
-            }}>{s.label}</div>
-            <div style={{
-              fontSize: 13, color: '#666', fontWeight: 400,
-            }}>{s.desc}</div>
-          </button>
-        ))}
-      </div>
-
-      <div style={{
-        marginTop: 48, display: 'flex', alignItems: 'center', gap: 8,
-      }}>
+      {customStarters.length > 0 ? (
         <div style={{
-          width: 20, height: 20, borderRadius: 6,
-          background: 'linear-gradient(135deg,#d4845e,#c07050)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 9, color: '#fff',
-        }}>✦</div>
-        <span style={{ fontSize: 12, color: '#444', fontWeight: 500 }}>
-          Powered by Wonder AI
-        </span>
+          display: 'grid',
+          gridTemplateColumns: 'repeat(2, 1fr)',
+          gap: 12, maxWidth: 560, width: '100%',
+        }}>
+          {customStarters.map((starter, i) => (
+            <button
+              key={i}
+              onClick={() => onSuggestionClick(starter)}
+              style={{
+                background: 'rgba(255,255,255,0.025)',
+                border: '1px solid rgba(255,255,255,0.06)',
+                borderRadius: 16, padding: '16px 20px',
+                textAlign: 'left', cursor: 'pointer',
+                transition: 'all 0.3s cubic-bezier(0.25,0.46,0.45,0.94)',
+                animation: `fadeInUp 0.5s ease ${i * 0.08}s both`,
+                color: '#ccc', fontSize: 14, fontFamily: 'Outfit', fontWeight: 500,
+                lineHeight: 1.5,
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.background = `${selectedAgent?.avatar_color || '#d4845e'}12`
+                e.currentTarget.style.borderColor = `${selectedAgent?.avatar_color || '#d4845e'}33`
+                e.currentTarget.style.transform = 'translateY(-2px)'
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = 'rgba(255,255,255,0.025)'
+                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)'
+                e.currentTarget.style.transform = 'translateY(0)'
+              }}
+            >
+              💬 {starter}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(2, 1fr)',
+          gap: 12, maxWidth: 560, width: '100%',
+        }}>
+          {SUGGESTIONS.map((s, i) => (
+            <button
+              key={i}
+              onClick={() => onSuggestionClick(s.label + ' ' + s.desc)}
+              style={{
+                background: 'rgba(255,255,255,0.025)',
+                border: '1px solid rgba(255,255,255,0.06)',
+                borderRadius: 16, padding: '18px 20px',
+                textAlign: 'left', cursor: 'pointer',
+                transition: 'all 0.3s cubic-bezier(0.25,0.46,0.45,0.94)',
+                animation: `fadeInUp 0.5s ease ${i * 0.08}s both`,
+                position: 'relative', overflow: 'hidden',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.background = 'rgba(212,132,94,0.06)'
+                e.currentTarget.style.borderColor = 'rgba(212,132,94,0.2)'
+                e.currentTarget.style.transform = 'translateY(-2px)'
+                e.currentTarget.style.boxShadow = '0 8px 30px rgba(0,0,0,0.2)'
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = 'rgba(255,255,255,0.025)'
+                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)'
+                e.currentTarget.style.transform = 'translateY(0)'
+                e.currentTarget.style.boxShadow = 'none'
+              }}
+            >
+              <div style={{ fontSize: 22, marginBottom: 10 }}>{s.icon}</div>
+              <div style={{
+                fontSize: 14, fontWeight: 600, color: '#ccc',
+                marginBottom: 4, fontFamily: 'Outfit',
+              }}>{s.label}</div>
+              <div style={{
+                fontSize: 13, color: '#666', fontWeight: 400,
+              }}>{s.desc}</div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div style={{
+        marginTop: 40, display: 'flex', alignItems: 'center', gap: 10,
+      }}>
+        <button
+          onClick={onOpenAgents}
+          style={{
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            color: '#aaa', padding: '6px 14px', borderRadius: 20,
+            fontSize: 12, fontWeight: 500, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: 6,
+            transition: 'all 0.2s',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(212,132,94,0.1)'; e.currentTarget.style.color = '#d4845e' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = '#aaa' }}
+        >
+          🤖 {selectedAgent ? 'Switch Agent' : 'Explore Custom Agents'}
+        </button>
       </div>
     </div>
   )
@@ -118,6 +193,14 @@ export default function ChatPage() {
   const [kbOpen, setKbOpen] = useState(false)
   const [kbRefresh, setKbRefresh] = useState(0)
   const [activeArtifact, setActiveArtifact] = useState(null)
+
+  // Agent studio state
+  const [selectedAgent, setSelectedAgent] = useState(null)
+  const [showAgentSelector, setShowAgentSelector] = useState(false)
+  const [showAgentBuilder, setShowAgentBuilder] = useState(false)
+  const [editAgent, setEditAgent] = useState(null)
+  const [activeSessionAgent, setActiveSessionAgent] = useState(null)
+
   const bottomRef = useRef()
   const abortRef = useRef(null)
   const inputRef = useRef(null)
@@ -165,6 +248,7 @@ export default function ChatPage() {
     if (!id) {
       setActiveSessionId(null)
       setActiveSession(null)
+      setActiveSessionAgent(null)
       setMessages([])
       return
     }
@@ -174,6 +258,15 @@ export default function ChatPage() {
       setActiveSession(session)
       setActiveSessionId(id)
       setMessages(msgs)
+
+      // Fetch agent details if session is linked to an agent
+      if (session?.agent_id) {
+        agentsAPI.get(session.agent_id).then(({ data }) => {
+          setActiveSessionAgent(data)
+        }).catch(() => setActiveSessionAgent(null))
+      } else {
+        setActiveSessionAgent(null)
+      }
     } catch (e) { console.error(e) }
   }
 
@@ -182,6 +275,7 @@ export default function ChatPage() {
   const createNewChat = async () => {
     setActiveSessionId(null)
     setActiveSession(null)
+    setActiveSessionAgent(null)
     setMessages([])
   }
 
@@ -259,17 +353,20 @@ export default function ChatPage() {
 
     if (!sessionId) {
       try {
-        const { data } = await chatAPI.createSession({
-          title: 'New Chat',
+        const sessionPayload = {
+          title: selectedAgent ? `${selectedAgent.name} Chat` : 'New Chat',
           mode: 'default',
-          model: defaultModel,
-          temperature: 0.7
-        })
+          model: selectedAgent?.model || defaultModel,
+          temperature: selectedAgent?.temperature ?? 0.7,
+          agent_id: selectedAgent?.id || null
+        }
+        const { data } = await chatAPI.createSession(sessionPayload)
         sessionId = data.id
         session = data
         setSessions(prev => [data, ...prev])
         setActiveSessionId(data.id)
         setActiveSession(data)
+        if (selectedAgent) setActiveSessionAgent(selectedAgent)
       } catch (e) { showNotif('Failed to create session', 'error'); return }
     }
 
@@ -277,11 +374,14 @@ export default function ChatPage() {
     setMessages(prev => [...prev, userMsg])
 
     const aiMsgId = Date.now().toString() + '-ai'
-    setMessages(prev => [...prev, { id: aiMsgId, role: 'assistant', content: '', created_at: new Date().toISOString() }])
+    setMessages(prev => [...prev, { id: aiMsgId, role: 'assistant', content: '', meta: {}, created_at: new Date().toISOString() }])
     setStreaming(true)
 
     const controller = new AbortController()
     abortRef.current = controller
+
+    // Collected sources from SSE web_sources events
+    let collectedSources = []
 
     await streamMessage(
       sessionId, content, useRag,
@@ -292,7 +392,16 @@ export default function ChatPage() {
         setStreaming(false)
         abortRef.current = null
         setMessages(prev => {
-          const finished = prev.map(m => m.id === aiMsgId ? { ...m, id: aiMsgId + '-done' } : m)
+          const finished = prev.map(m => {
+            if (m.id === aiMsgId) {
+              return {
+                ...m,
+                id: aiMsgId + '-done',
+                meta: { ...m.meta, web_sources: collectedSources.length > 0 ? collectedSources : undefined }
+              }
+            }
+            return m
+          })
           const last = finished.find(m => m.id === aiMsgId + '-done')
           if (last && !last.content.trim()) {
             return finished.map(m => m.id === aiMsgId + '-done' ? {
@@ -314,9 +423,26 @@ export default function ChatPage() {
         showNotif('AI provider error — check your backend configuration', 'error')
       },
       controller.signal,
-      { images }
+      {
+        images,
+        onSources: (sources) => {
+          collectedSources = sources
+          // Attach sources to the message immediately for live rendering
+          setMessages(prev => prev.map(m =>
+            m.id === aiMsgId ? { ...m, meta: { ...m.meta, web_sources: sources, searching: false } } : m
+          ))
+        },
+        onToolResult: (result) => {
+          // Show "Searching the web..." indicator when web_search tool is invoked
+          if (result?.tool === 'web_search') {
+            setMessages(prev => prev.map(m =>
+              m.id === aiMsgId ? { ...m, meta: { ...m.meta, searching: true, searchQuery: result?.result?.query || '' } } : m
+            ))
+          }
+        }
+      }
     )
-  }, [activeSessionId, activeSession, streaming, useRag, defaultModel])
+  }, [activeSessionId, activeSession, streaming, useRag, defaultModel, selectedAgent])
 
   const handleStop = useCallback(() => {
     if (abortRef.current) {
@@ -342,15 +468,17 @@ export default function ChatPage() {
     if (!sessionId) {
       try {
         const { data } = await chatAPI.createSession({
-          title: 'New Chat',
+          title: selectedAgent ? `${selectedAgent.name} Chat` : 'New Chat',
           mode: 'default',
-          model: defaultModel,
-          temperature: 0.7
+          model: selectedAgent?.model || defaultModel,
+          temperature: selectedAgent?.temperature ?? 0.7,
+          agent_id: selectedAgent?.id || null
         })
         sessionId = data.id
         setSessions(prev => [data, ...prev])
         setActiveSessionId(data.id)
         setActiveSession(data)
+        if (selectedAgent) setActiveSessionAgent(selectedAgent)
       } catch (e) {
         showNotif('Failed to create session for upload', 'error')
         return
@@ -368,6 +496,7 @@ export default function ChatPage() {
   }
 
   const isWelcome = messages.length === 0
+  const currentDisplayAgent = activeSessionId ? activeSessionAgent : selectedAgent
 
   return (
     <div style={{ display: 'flex', height: '100vh', width: '100%' }}>
@@ -377,6 +506,9 @@ export default function ChatPage() {
         onNewChat={createNewChat}
         sessions={sessions}
         setSessions={setSessions}
+        onOpenAgents={() => setShowAgentSelector(true)}
+        onOpenBuilder={() => { setEditAgent(null); setShowAgentBuilder(true) }}
+        selectedAgent={selectedAgent}
       />
 
       <div style={{
@@ -393,12 +525,15 @@ export default function ChatPage() {
           onExport={handleExport}
           onToggleKB={() => setKbOpen(!kbOpen)}
           kbOpen={kbOpen}
+          agent={currentDisplayAgent}
         />
 
         {isWelcome ? (
           <WelcomeScreen
             username={user?.username}
+            selectedAgent={selectedAgent}
             onSuggestionClick={handleSend}
+            onOpenAgents={() => setShowAgentSelector(true)}
           />
         ) : (
           <div style={{
@@ -424,6 +559,7 @@ export default function ChatPage() {
                   onRegenerate={handleRegenerate}
                   onFeedback={handleFeedback}
                   onOpenArtifact={(art) => setActiveArtifact(art)}
+                  agent={currentDisplayAgent}
                 />
               </div>
             ))}
@@ -439,16 +575,16 @@ export default function ChatPage() {
                 }}>
                   <div style={{
                     width: 30, height: 30, borderRadius: 10,
-                    background: 'linear-gradient(135deg,#d4845e,#c07050)',
+                    background: currentDisplayAgent?.avatar_color ? `linear-gradient(135deg, ${currentDisplayAgent.avatar_color}, ${currentDisplayAgent.avatar_color}88)` : 'linear-gradient(135deg,#d4845e,#c07050)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 12, color: '#fff',
+                    fontSize: currentDisplayAgent ? 16 : 12, color: '#fff',
                     animation: 'breathe 2s ease infinite',
-                  }}>✦</div>
+                  }}>{currentDisplayAgent?.avatar_emoji || '✦'}</div>
                   <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
                     {[0, 1, 2].map(i => (
                       <div key={i} style={{
                         width: 5, height: 5, borderRadius: '50%',
-                        background: '#d4845e',
+                        background: currentDisplayAgent?.avatar_color || '#d4845e',
                         animation: 'pulse 1.4s ease infinite',
                         animationDelay: `${i * 0.2}s`,
                       }} />
@@ -478,6 +614,39 @@ export default function ChatPage() {
       <ArtifactsPanel
         artifact={activeArtifact}
         onClose={() => setActiveArtifact(null)}
+      />
+
+      {/* Agent Selector Overlay */}
+      <AgentSelector
+        isOpen={showAgentSelector}
+        onClose={() => setShowAgentSelector(false)}
+        onSelectAgent={(ag) => {
+          setSelectedAgent(ag)
+          createNewChat()
+          showNotif(ag ? `Switched to "${ag.name}"` : 'Switched to default NeuralChat')
+        }}
+        onCreateAgent={() => {
+          setShowAgentSelector(false)
+          setEditAgent(null)
+          setShowAgentBuilder(true)
+        }}
+        onEditAgent={(ag) => {
+          setShowAgentSelector(false)
+          setEditAgent(ag)
+          setShowAgentBuilder(true)
+        }}
+      />
+
+      {/* Agent Builder Modal */}
+      <AgentBuilderModal
+        isOpen={showAgentBuilder}
+        onClose={() => setShowAgentBuilder(false)}
+        editAgent={editAgent}
+        onSave={(savedAgent) => {
+          setSelectedAgent(savedAgent)
+          createNewChat()
+          showNotif(`Agent "${savedAgent.name}" saved!`)
+        }}
       />
 
       {/* Notification toast */}

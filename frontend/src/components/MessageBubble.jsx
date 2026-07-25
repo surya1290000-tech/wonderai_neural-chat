@@ -4,6 +4,76 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { useState } from 'react'
 
+// ─── Citation Chip [1] with hover tooltip ───────────
+function CitationChip({ index, source }) {
+  const [hovered, setHovered] = useState(false)
+
+  return (
+    <span
+      className="citation-chip"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onClick={() => source?.url && window.open(source.url, '_blank')}
+      title={source?.title || ''}
+    >
+      {index}
+      {hovered && source && (
+        <span className="citation-tooltip">
+          <div className="citation-tooltip-title">{source.title}</div>
+          <div className="citation-tooltip-domain">
+            {source.favicon && <img src={source.favicon} alt="" />}
+            <span>{source.domain || source.url}</span>
+          </div>
+        </span>
+      )}
+    </span>
+  )
+}
+
+// ─── Sources Bar (Perplexity-style horizontal cards) ─
+function SourcesBar({ sources }) {
+  if (!sources || sources.length === 0) return null
+
+  return (
+    <div>
+      <div className="sources-header">
+        <span className="sources-header-icon">🌐</span>
+        <span>Sources</span>
+        <span className="sources-count">· {sources.length} results</span>
+      </div>
+      <div className="sources-bar">
+        {sources.map((s, i) => (
+          <a
+            key={i}
+            href={s.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="source-card"
+          >
+            <div className="source-card-header">
+              <span className="source-card-index">{s.index || i + 1}</span>
+              {s.favicon && <img src={s.favicon} alt="" className="source-card-favicon" />}
+              <span className="source-card-domain">{s.domain || 'web'}</span>
+            </div>
+            <div className="source-card-title">{s.title}</div>
+          </a>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ─── Web Search Indicator Animation ──────────────────
+function WebSearchIndicator({ query }) {
+  return (
+    <div className="web-search-indicator">
+      <div className="web-search-spinner" />
+      <span className="web-search-text">Searching the web</span>
+      {query && <span className="web-search-query">"{query}"</span>}
+    </div>
+  )
+}
+
 function ImageCard({ src, alt }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
@@ -82,45 +152,30 @@ function ImageCard({ src, alt }) {
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         overflow: 'hidden'
       }}>
-        {/* ChatGPT Shimmer Light Beam */}
         {loading && !error && <div className="chatgpt-shimmer-beam" />}
-
-        {/* ChatGPT Central Creation Animation */}
         {loading && !error && (
           <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center',
             gap: 14, padding: 40, color: '#ececec', zIndex: 2
           }}>
             <div style={{ position: 'relative', width: 54, height: 54, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {/* Outer Rotating Gradient Ring */}
               <div style={{
                 position: 'absolute', inset: 0, borderRadius: '50%',
                 background: 'conic-gradient(from 0deg, transparent 0%, #d4845e 50%, #e0956f 80%, transparent 100%)',
                 animation: 'chatgptSpin 1.4s linear infinite',
                 opacity: 0.85
               }} />
-              {/* Inner Dark Mask */}
               <div style={{
                 position: 'absolute', inset: 3, borderRadius: '50%',
                 background: '#0d0d12',
                 display: 'flex', alignItems: 'center', justifyContent: 'center'
               }}>
-                <span style={{
-                  fontSize: 20, color: '#d4845e',
-                  animation: 'chatgptSparklePulse 1.8s ease-in-out infinite'
-                }}>
-                  ✨
-                </span>
+                <span style={{ fontSize: 20, color: '#d4845e', animation: 'chatgptSparklePulse 1.8s ease-in-out infinite' }}>✨</span>
               </div>
             </div>
-
             <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: '#eee', fontFamily: 'Outfit, sans-serif', letterSpacing: '0.02em' }}>
-                Creating image with FLUX.1 AI...
-              </div>
-              <div style={{ fontSize: 11, color: '#777', marginTop: 4, fontFamily: 'Inter, sans-serif' }}>
-                Synthesizing photorealistic 8K artwork
-              </div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#eee', fontFamily: 'Outfit, sans-serif' }}>Creating image with FLUX.1 AI...</div>
+              <div style={{ fontSize: 11, color: '#777', marginTop: 4 }}>Synthesizing photorealistic 8K artwork</div>
             </div>
           </div>
         )}
@@ -129,57 +184,36 @@ function ImageCard({ src, alt }) {
           <div style={{ padding: 24, textAlign: 'center', color: '#f87171', fontSize: 13 }}>
             ⚠️ Could not load image preview.
             <div style={{ marginTop: 8 }}>
-              <a href={imgSrc} target="_blank" rel="noreferrer" style={{ color: '#d4845e', textDecoration: 'underline' }}>
-                Open Direct Link
-              </a>
+              <a href={imgSrc} target="_blank" rel="noreferrer" style={{ color: '#d4845e', textDecoration: 'underline' }}>Open Direct Link</a>
             </div>
           </div>
         ) : (
           <img
-            src={imgSrc}
-            alt={alt || 'Generated Image'}
+            src={imgSrc} alt={alt || 'Generated Image'}
             onLoad={() => setLoading(false)}
             onError={() => { setLoading(false); setError(true) }}
             className={!loading ? 'chatgpt-image-loaded' : ''}
-            style={{
-              width: '100%',
-              height: 'auto',
-              display: loading ? 'none' : 'block',
-              cursor: 'pointer',
-              borderRadius: '0 0 16px 16px',
-            }}
+            style={{ width: '100%', height: 'auto', display: loading ? 'none' : 'block', cursor: 'pointer', borderRadius: '0 0 16px 16px' }}
             onClick={() => setLightbox(true)}
           />
         )}
       </div>
 
       {alt && !loading && (
-        <div style={{ padding: '8px 16px', fontSize: 12, color: '#888', fontStyle: 'italic', background: 'rgba(0,0,0,0.3)' }}>
-          "{alt}"
-        </div>
+        <div style={{ padding: '8px 16px', fontSize: 12, color: '#888', fontStyle: 'italic', background: 'rgba(0,0,0,0.3)' }}>"{alt}"</div>
       )}
 
-      {/* Lightbox Modal */}
       {lightbox && (
-        <div
-          onClick={() => setLightbox(false)}
-          style={{
-            position: 'fixed', inset: 0, zIndex: 9999,
-            background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(12px)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            padding: 24, cursor: 'zoom-out'
-          }}
-        >
-          <img
-            src={imgSrc}
-            alt={alt}
-            style={{
-              maxHeight: '90vh', maxWidth: '90vw', borderRadius: 18,
-              boxShadow: '0 25px 70px rgba(0,0,0,0.9)',
-              objectFit: 'contain',
-              animation: 'chatgptImageReveal 0.4s ease forwards'
-            }}
-          />
+        <div onClick={() => setLightbox(false)} style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(12px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, cursor: 'zoom-out'
+        }}>
+          <img src={imgSrc} alt={alt} style={{
+            maxHeight: '90vh', maxWidth: '90vw', borderRadius: 18,
+            boxShadow: '0 25px 70px rgba(0,0,0,0.9)', objectFit: 'contain',
+            animation: 'chatgptImageReveal 0.4s ease forwards'
+          }} />
         </div>
       )}
     </div>
@@ -200,60 +234,25 @@ function CodeBlock({ language, children, onOpenArtifact }) {
     <div style={{ position: 'relative', marginBottom: 16, borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.06)' }}>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        background: 'rgba(255,255,255,0.03)',
-        padding: '8px 14px',
+        background: 'rgba(255,255,255,0.03)', padding: '8px 14px',
       }}>
-        <span style={{
-          fontSize: 11, color: '#777',
-          fontFamily: 'JetBrains Mono',
-          textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 500,
-        }}>{language || 'code'}</span>
-        
+        <span style={{ fontSize: 11, color: '#777', fontFamily: 'JetBrains Mono', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 500 }}>{language || 'code'}</span>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           {isArtifactLanguage && onOpenArtifact && (
             <button
-              onClick={() => onOpenArtifact({
-                title: `${language?.toUpperCase() || 'Code'} Artifact`,
-                language: language || 'html',
-                code: children,
-              })}
-              style={{
-                background: 'rgba(212,132,94,0.15)',
-                color: '#d4845e',
-                fontSize: 12, padding: '3px 10px', borderRadius: 6,
-                border: '1px solid rgba(212,132,94,0.3)',
-                cursor: 'pointer', fontWeight: 600,
-                transition: 'all 0.2s ease',
-              }}
-            >
-              ⚡ Open Artifact
-            </button>
+              onClick={() => onOpenArtifact({ title: `${language?.toUpperCase() || 'Code'} Artifact`, language: language || 'html', code: children })}
+              style={{ background: 'rgba(212,132,94,0.15)', color: '#d4845e', fontSize: 12, padding: '3px 10px', borderRadius: 6, border: '1px solid rgba(212,132,94,0.3)', cursor: 'pointer', fontWeight: 600, transition: 'all 0.2s ease' }}
+            >⚡ Open Artifact</button>
           )}
-
           <button onClick={copy} style={{
             background: copied ? 'rgba(74,222,128,0.1)' : 'rgba(255,255,255,0.04)',
-            color: copied ? '#4ade80' : '#888',
-            fontSize: 12, padding: '3px 10px', borderRadius: 6,
+            color: copied ? '#4ade80' : '#888', fontSize: 12, padding: '3px 10px', borderRadius: 6,
             border: `1px solid ${copied ? 'rgba(74,222,128,0.2)' : 'rgba(255,255,255,0.06)'}`,
-            cursor: 'pointer', fontWeight: 500,
-            transition: 'all 0.2s ease',
-          }}>
-            {copied ? '✓ Copied' : 'Copy'}
-          </button>
+            cursor: 'pointer', fontWeight: 500, transition: 'all 0.2s ease',
+          }}>{copied ? '✓ Copied' : 'Copy'}</button>
         </div>
       </div>
-      <SyntaxHighlighter
-        language={language}
-        style={oneDark}
-        customStyle={{
-          margin: 0, borderRadius: 0,
-          background: '#111114',
-          fontSize: 13.5, padding: '16px',
-          border: 'none',
-        }}
-        showLineNumbers={true}
-        lineNumberStyle={{ color: '#333', fontSize: 12, marginRight: 8 }}
-      >
+      <SyntaxHighlighter language={language} style={oneDark} customStyle={{ margin: 0, borderRadius: 0, background: '#111114', fontSize: 13.5, padding: '16px', border: 'none' }} showLineNumbers={true} lineNumberStyle={{ color: '#333', fontSize: 12, marginRight: 8 }}>
         {children}
       </SyntaxHighlighter>
     </div>
@@ -263,195 +262,147 @@ function CodeBlock({ language, children, onOpenArtifact }) {
 function ActionButton({ icon, label, onClick, active, activeColor }) {
   const [hovered, setHovered] = useState(false)
   return (
-    <button
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      title={label}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 5,
-        padding: '5px 10px', borderRadius: 8,
-        background: active
-          ? `${activeColor || 'rgba(212,132,94,0.1)'}`
-          : hovered ? 'rgba(255,255,255,0.06)' : 'transparent',
-        border: 'none',
-        color: active ? (activeColor === 'rgba(74,222,128,0.1)' ? '#4ade80' : activeColor === 'rgba(248,113,113,0.1)' ? '#f87171' : '#d4845e')
-          : hovered ? '#ccc' : '#555',
-        fontSize: 13, cursor: 'pointer',
-        transition: 'all 0.2s ease',
-        fontWeight: 500,
-      }}
-    >
+    <button onClick={onClick} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} title={label} style={{
+      display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 8,
+      background: active ? `${activeColor || 'rgba(212,132,94,0.1)'}` : hovered ? 'rgba(255,255,255,0.06)' : 'transparent',
+      border: 'none',
+      color: active ? (activeColor === 'rgba(74,222,128,0.1)' ? '#4ade80' : activeColor === 'rgba(248,113,113,0.1)' ? '#f87171' : '#d4845e') : hovered ? '#ccc' : '#555',
+      fontSize: 13, cursor: 'pointer', transition: 'all 0.2s ease', fontWeight: 500,
+    }}>
       <span style={{ fontSize: 14 }}>{icon}</span>
       {label && <span style={{ fontSize: 12 }}>{label}</span>}
     </button>
   )
 }
 
-export default function MessageBubble({ message, isStreaming, onRegenerate, onFeedback, onOpenArtifact }) {
+// ─── Inline Citation Processor ───────────────────────
+function renderContentWithCitations(content, sources) {
+  if (!sources || sources.length === 0) return content
+  const parts = content.split(/(\[\d+\])/)
+  return parts.map((part, i) => {
+    const match = part.match(/^\[(\d+)\]$/)
+    if (match) {
+      const idx = parseInt(match[1])
+      const source = sources.find(s => s.index === idx)
+      if (source) return <CitationChip key={i} index={idx} source={source} />
+    }
+    return part
+  })
+}
+
+export default function MessageBubble({ message, isStreaming, onRegenerate, onFeedback, onOpenArtifact, agent }) {
   const isUser = message.role === 'user'
   const [copied, setCopied] = useState(false)
   const [liked, setLiked] = useState(message.meta?.feedback || null)
   const images = message.meta?.images || message.images || []
+  const webSources = message.meta?.web_sources || []
+  const isSearching = message.meta?.searching || false
+  const searchQuery = message.meta?.searchQuery || ''
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(message.content)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
+  const handleCopy = () => { navigator.clipboard.writeText(message.content); setCopied(true); setTimeout(() => setCopied(false), 2000) }
+  const handleRegenerate = () => { if (onRegenerate) onRegenerate(message.id) }
+  const handleLike = (type) => { const v = liked === type ? null : type; setLiked(v); if (onFeedback) onFeedback(message.id, v || 'none') }
+  const handleReadAloud = () => { if ('speechSynthesis' in window) { const u = new SpeechSynthesisUtterance(message.content); u.rate = 1.0; u.pitch = 1.0; window.speechSynthesis.speak(u) } }
 
-  const handleRegenerate = () => {
-    if (onRegenerate) onRegenerate(message.id)
-  }
+  const avatarBg = isUser
+    ? 'rgba(255,255,255,0.08)'
+    : agent?.avatar_color
+    ? `linear-gradient(135deg, ${agent.avatar_color}, ${agent.avatar_color}88)`
+    : 'linear-gradient(135deg,#d4845e,#c07050)'
 
-  const handleLike = (type) => {
-    const newValue = liked === type ? null : type
-    setLiked(newValue)
-    if (onFeedback) onFeedback(message.id, newValue || 'none')
-  }
-
-  const handleReadAloud = () => {
-    if ('speechSynthesis' in window) {
-      const utter = new SpeechSynthesisUtterance(message.content)
-      utter.rate = 1.0
-      utter.pitch = 1.0
-      window.speechSynthesis.speak(utter)
-    }
-  }
+  const avatarContent = isUser ? 'U' : (agent?.avatar_emoji || '✦')
+  const assistantName = agent?.name || 'NeuralChat'
 
   return (
-    <div className="fade-in" style={{
-      display: 'flex', justifyContent: 'center',
-      marginBottom: 4, padding: '14px 24px',
-      animation: 'fadeInUp 0.35s ease forwards',
-    }}>
-      <div style={{
-        maxWidth: 'var(--content-max-width, 780px)',
-        width: '100%', display: 'flex', gap: 16,
-        alignItems: 'flex-start',
-      }}>
+    <div className="fade-in" style={{ display: 'flex', justifyContent: 'center', marginBottom: 4, padding: '14px 24px', animation: 'fadeInUp 0.35s ease forwards' }}>
+      <div style={{ maxWidth: 'var(--content-max-width, 780px)', width: '100%', display: 'flex', gap: 16, alignItems: 'flex-start' }}>
         {/* Avatar */}
         <div style={{
           width: 30, height: 30, borderRadius: 10,
-          background: isUser
-            ? 'rgba(255,255,255,0.08)'
-            : 'linear-gradient(135deg,#d4845e,#c07050)',
+          background: avatarBg,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: isUser ? 13 : 12,
-          flexShrink: 0, marginTop: 2,
-          color: isUser ? '#999' : '#fff',
-          fontWeight: 600,
+          fontSize: isUser ? 13 : (agent ? 16 : 12), flexShrink: 0, marginTop: 2,
+          color: isUser ? '#999' : '#fff', fontWeight: 600,
           border: isUser ? '1px solid rgba(255,255,255,0.08)' : 'none',
-        }}>
-          {isUser ? 'U' : '✦'}
-        </div>
+        }}>{avatarContent}</div>
 
         {/* Content */}
         <div style={{ flex: 1, minWidth: 0, paddingTop: 2 }}>
-          {/* Role label */}
-          <div style={{
-            fontSize: 13, fontWeight: 600,
-            color: isUser ? '#999' : '#d4845e',
-            marginBottom: 6,
-            fontFamily: 'Outfit',
-          }}>
-            {isUser ? 'You' : 'NeuralChat'}
+          <div style={{ fontSize: 13, fontWeight: 600, color: isUser ? '#999' : (agent?.avatar_color || '#d4845e'), marginBottom: 6, fontFamily: 'Outfit' }}>
+            {isUser ? 'You' : assistantName}
           </div>
 
-          {/* User attached images */}
           {images.length > 0 && (
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
               {images.map((img, idx) => (
-                <img
-                  key={idx}
-                  src={img}
-                  alt="Attachment"
-                  style={{
-                    maxHeight: 180, maxWidth: 280, borderRadius: 12,
-                    objectFit: 'cover', border: '1px solid rgba(255,255,255,0.1)',
-                  }}
-                />
+                <img key={idx} src={img} alt="Attachment" style={{ maxHeight: 180, maxWidth: 280, borderRadius: 12, objectFit: 'cover', border: '1px solid rgba(255,255,255,0.1)' }} />
               ))}
             </div>
           )}
 
+          {/* Web Search Indicator */}
+          {!isUser && isSearching && !message.content && (
+            <WebSearchIndicator query={searchQuery} />
+          )}
+
           {isUser ? (
-            <p style={{
-              color: '#ddd', whiteSpace: 'pre-wrap', margin: 0,
-              fontSize: 15, lineHeight: 1.7,
-            }}>{message.content}</p>
+            <p style={{ color: '#ddd', whiteSpace: 'pre-wrap', margin: 0, fontSize: 15, lineHeight: 1.7 }}>{message.content}</p>
           ) : (
-            <div className={`message-content ${isStreaming ? 'typing-cursor' : ''}`}
-              style={{ color: '#ccc', fontSize: 15 }}
-            >
+            <div className={`message-content ${isStreaming ? 'typing-cursor' : ''}`} style={{ color: '#ccc', fontSize: 15 }}>
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={{
                   code({ node, inline, className, children, ...props }) {
                     const match = /language-(\w+)/.exec(className || '')
                     return !inline && match ? (
-                      <CodeBlock language={match[1]} onOpenArtifact={onOpenArtifact}>
-                        {String(children).replace(/\n$/, '')}
-                      </CodeBlock>
+                      <CodeBlock language={match[1]} onOpenArtifact={onOpenArtifact}>{String(children).replace(/\n$/, '')}</CodeBlock>
                     ) : (
                       <code className={className} {...props}>{children}</code>
                     )
                   },
                   img({ node, src, alt, ...props }) {
                     return <ImageCard src={src} alt={alt} />
+                  },
+                  p({ children }) {
+                    if (webSources.length > 0 && Array.isArray(children)) {
+                      return <p>{children.map((child, i) => typeof child === 'string' ? <span key={i}>{renderContentWithCitations(child, webSources)}</span> : child)}</p>
+                    }
+                    if (webSources.length > 0 && typeof children === 'string') {
+                      return <p>{renderContentWithCitations(children, webSources)}</p>
+                    }
+                    return <p>{children}</p>
+                  },
+                  li({ children }) {
+                    if (webSources.length > 0 && Array.isArray(children)) {
+                      return <li>{children.map((child, i) => typeof child === 'string' ? <span key={i}>{renderContentWithCitations(child, webSources)}</span> : child)}</li>
+                    }
+                    return <li>{children}</li>
                   }
                 }}
               >
                 {message.content.replace(/```tool[\s\S]*?```/g, '').trim()}
               </ReactMarkdown>
+
+              {/* Sources Bar */}
+              {!isStreaming && webSources.length > 0 && (
+                <SourcesBar sources={webSources} />
+              )}
             </div>
           )}
 
-          {/* Timestamp */}
           {message.created_at && (
-            <div style={{
-              fontSize: 11, color: '#444', marginTop: 8,
-              fontFamily: 'JetBrains Mono',
-            }}>
+            <div style={{ fontSize: 11, color: '#444', marginTop: 8, fontFamily: 'JetBrains Mono' }}>
               {new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </div>
           )}
 
-          {/* Action buttons for assistant messages */}
           {!isUser && !isStreaming && message.content && (
-            <div style={{
-              display: 'flex', gap: 2, marginTop: 10,
-              animation: 'fadeIn 0.3s ease',
-            }}>
-              <ActionButton
-                icon={copied ? '✓' : '📋'}
-                label={copied ? 'Copied!' : 'Copy'}
-                onClick={handleCopy}
-                active={copied}
-                activeColor="rgba(74,222,128,0.1)"
-              />
-              <ActionButton
-                icon="🔄"
-                label="Regenerate"
-                onClick={handleRegenerate}
-              />
-              <ActionButton
-                icon="🔊"
-                label="Read"
-                onClick={handleReadAloud}
-              />
-              <ActionButton
-                icon="👍"
-                onClick={() => handleLike('up')}
-                active={liked === 'up'}
-                activeColor="rgba(74,222,128,0.1)"
-              />
-              <ActionButton
-                icon="👎"
-                onClick={() => handleLike('down')}
-                active={liked === 'down'}
-                activeColor="rgba(248,113,113,0.1)"
-              />
+            <div style={{ display: 'flex', gap: 2, marginTop: 10, animation: 'fadeIn 0.3s ease' }}>
+              <ActionButton icon={copied ? '✓' : '📋'} label={copied ? 'Copied!' : 'Copy'} onClick={handleCopy} active={copied} activeColor="rgba(74,222,128,0.1)" />
+              <ActionButton icon="🔄" label="Regenerate" onClick={handleRegenerate} />
+              <ActionButton icon="🔊" label="Read" onClick={handleReadAloud} />
+              <ActionButton icon="👍" onClick={() => handleLike('up')} active={liked === 'up'} activeColor="rgba(74,222,128,0.1)" />
+              <ActionButton icon="👎" onClick={() => handleLike('down')} active={liked === 'down'} activeColor="rgba(248,113,113,0.1)" />
             </div>
           )}
         </div>

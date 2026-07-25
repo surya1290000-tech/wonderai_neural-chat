@@ -62,6 +62,18 @@ def verify_refresh_token(token: str) -> Optional[str]:
     except JWTError:
         return None
 
+def decode_access_token(token: str) -> Optional[dict]:
+    """Decode an access token and return payload, or None if invalid/blacklisted."""
+    if is_token_blacklisted(token):
+        return None
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        if payload.get("type", "access") != "access":
+            return None
+        return payload
+    except JWTError:
+        return None
+
 async def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db)

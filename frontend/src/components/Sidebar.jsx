@@ -3,7 +3,7 @@ import { chatAPI } from '../utils/api'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 
-export default function Sidebar({ activeSession, onSelectSession, onNewChat, sessions, setSessions }) {
+export default function Sidebar({ activeSession, onSelectSession, onNewChat, sessions, setSessions, onOpenAgents, onOpenBuilder, selectedAgent }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const [hoveredId, setHoveredId] = useState(null)
@@ -133,7 +133,7 @@ export default function Sidebar({ activeSession, onSelectSession, onNewChat, ses
       </div>
 
       {/* New Chat */}
-      <div style={{ padding: '0 12px 8px' }}>
+      <div style={{ padding: '0 12px 8px', display: 'flex', flexDirection: 'column', gap: 6 }}>
         <button
           onClick={onNewChat}
           style={{
@@ -141,7 +141,7 @@ export default function Sidebar({ activeSession, onSelectSession, onNewChat, ses
             background: 'rgba(255,255,255,0.04)',
             border: '1px dashed rgba(255,255,255,0.1)',
             color: '#aaa', borderRadius: 12,
-            padding: '11px 14px',
+            padding: '10px 14px',
             fontWeight: 500, fontSize: 14,
             fontFamily: 'Outfit', display: 'flex',
             alignItems: 'center', gap: 10,
@@ -151,6 +151,34 @@ export default function Sidebar({ activeSession, onSelectSession, onNewChat, ses
           onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = '#aaa' }}
         >
           <span style={{ fontSize: 16 }}>+</span> New conversation
+        </button>
+
+        <button
+          onClick={onOpenAgents}
+          style={{
+            width: '100%',
+            background: selectedAgent ? `${selectedAgent.avatar_color || '#d4845e'}18` : 'rgba(255,255,255,0.03)',
+            border: `1px solid ${selectedAgent ? (selectedAgent.avatar_color || '#d4845e') + '35' : 'rgba(255,255,255,0.06)'}`,
+            color: selectedAgent ? (selectedAgent.avatar_color || '#d4845e') : '#aaa',
+            borderRadius: 12,
+            padding: '9px 14px',
+            fontWeight: 500, fontSize: 13,
+            fontFamily: 'Outfit', display: 'flex',
+            alignItems: 'center', justifyContent: 'space-between',
+            transition: 'all 0.25s ease',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(212,132,94,0.3)' }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = selectedAgent ? (selectedAgent.avatar_color || '#d4845e') + '35' : 'rgba(255,255,255,0.06)' }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden' }}>
+            <span style={{ fontSize: 15 }}>{selectedAgent ? selectedAgent.avatar_emoji : '🤖'}</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {selectedAgent ? selectedAgent.name : 'AI Agent Studio'}
+            </span>
+          </div>
+          <span style={{ fontSize: 11, opacity: 0.6, background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: 6 }}>
+            Browse
+          </span>
         </button>
       </div>
 

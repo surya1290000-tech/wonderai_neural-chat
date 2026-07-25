@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     GEMINI_DEFAULT_MODEL: str = "gemini-flash-latest"
     
+    # Web Search (Perplexity-style deep search)
+    GOOGLE_SEARCH_API_KEY: str = ""
+    GOOGLE_SEARCH_CX: str = ""  # Custom Search Engine ID
+    WEB_SEARCH_SCRAPE_CONTENT: bool = True  # Scrape page content for deep answers
+    WEB_SEARCH_MAX_RESULTS: int = 6
+    
     # RAG settings
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
     CHUNK_SIZE: int = 300
@@ -58,9 +64,15 @@ class Settings(BaseSettings):
     VECTORSTORE_DIR: str = "./data/vectorstore"
     MAX_UPLOAD_SIZE_MB: int = 20
     
-    # Rate limiting
-    RATE_LIMIT_RPM: int = 60  # requests per minute per IP
+    # Redis & Distributed Caching
+    REDIS_URL: str = ""  # e.g., "redis://localhost:6379/0" or "redis://redis:6379/0"
+    
+    # Tiered Rate Limiting (Requests Per Minute)
     RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_RPM: int = 120        # Standard API endpoints
+    RATE_LIMIT_CHAT_RPM: int = 40    # Streaming chat messages
+    RATE_LIMIT_IMAGE_RPM: int = 10   # FLUX/Imagen AI Image Generation
+    RATE_LIMIT_AUTH_RPM: int = 15    # Login / Register / OTP endpoints
     
     # Input validation limits
     MAX_MESSAGE_LENGTH: int = 32000

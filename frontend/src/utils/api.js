@@ -124,6 +124,19 @@ export const imagesAPI = {
   generate: (d) => api.post('/images/generate', d),
 }
 
+// Agents API (Custom GPTs / Persona Studio)
+export const agentsAPI = {
+  list: () => api.get('/agents/'),
+  create: (d) => api.post('/agents/', d),
+  get: (id) => api.get(`/agents/${id}`),
+  update: (id, d) => api.patch(`/agents/${id}`, d),
+  delete: (id) => api.delete(`/agents/${id}`),
+  share: (id) => api.post(`/agents/${id}/share`),
+  getShared: (shareId) => api.get(`/agents/shared/${shareId}`),
+  clone: (shareId) => api.post(`/agents/shared/${shareId}/clone`),
+  featured: () => api.get('/agents/discover/featured'),
+}
+
 /**
  * STREAMING: Opens a fetch SSE connection to the streaming endpoint
  * Returns an EventSource-like stream via ReadableStream
@@ -170,6 +183,14 @@ export async function streamMessage(sessionId, content, useRag, onChunk, onDone,
           if (data.error) { onError(data.error); return }
           if (data.done) { onDone(); return }
           if (data.content) onChunk(data.content)
+          // Emit web search sources for citation rendering
+          if (data.web_sources && opts.onSources) {
+            opts.onSources(data.web_sources)
+          }
+          // Emit tool result for search animation indicators
+          if (data.tool_result && opts.onToolResult) {
+            opts.onToolResult(data.tool_result)
+          }
         } catch { /* partial chunk */ }
       }
     }

@@ -8,7 +8,7 @@ const MODES = [
   { id: 'director', label: 'Director', icon: '◆', desc: 'Business advisor' },
 ]
 
-export default function ChatHeader({ session, onSessionUpdate, onExport, onToggleKB, kbOpen }) {
+export default function ChatHeader({ session, onSessionUpdate, onExport, onToggleKB, kbOpen, agent }) {
   const [models, setModels] = useState([])
   const [showSettings, setShowSettings] = useState(false)
   const [temp, setTemp] = useState(session?.temperature ?? 0.7)
@@ -47,14 +47,32 @@ export default function ChatHeader({ session, onSessionUpdate, onExport, onToggl
         minHeight: 52,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {agent && (
+            <div style={{
+              width: 28, height: 28, borderRadius: 8,
+              background: `linear-gradient(135deg, ${agent.avatar_color || '#d4845e'}, ${agent.avatar_color || '#d4845e'}88)`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 16, flexShrink: 0,
+            }}>{agent.avatar_emoji || '🤖'}</div>
+          )}
           <span style={{
             fontFamily: 'Outfit', fontWeight: 600, fontSize: 15,
             color: session ? '#ccc' : '#888',
             letterSpacing: '-0.01em',
           }}>
-            {session?.title || 'New conversation'}
+            {agent ? `${agent.name} — ${session?.title || 'New Chat'}` : (session?.title || 'New conversation')}
           </span>
-          {session && (
+          {agent ? (
+            <span style={{
+              fontSize: 11, color: agent.avatar_color || '#d4845e',
+              background: `${agent.avatar_color || '#d4845e'}18`,
+              padding: '3px 10px', borderRadius: 20,
+              border: `1px solid ${agent.avatar_color || '#d4845e'}33`,
+              fontWeight: 600, fontFamily: 'Outfit',
+            }}>
+              AGENT
+            </span>
+          ) : session && (
             <span style={{
               fontSize: 12, color: '#888',
               background: 'rgba(255,255,255,0.04)',

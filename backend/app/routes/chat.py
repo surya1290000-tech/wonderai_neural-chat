@@ -15,6 +15,7 @@ from app.config import settings
 from app.database import get_db, AsyncSessionLocal
 from app.models.user import User
 from app.models.chat import ChatSession, Message
+from app.models.agent import Agent
 from app.utils.auth import get_current_user
 from app.services.ai_service import ai_service
 from app.services.rag_service import rag_service
@@ -27,6 +28,7 @@ class CreateSessionRequest(BaseModel):
     model: Optional[str] = None  # None = use AI provider default from settings
     temperature: float = 0.7
     system_prompt: Optional[str] = None
+    agent_id: Optional[str] = None  # Link session to a custom agent
 
 class UpdateSessionRequest(BaseModel):
     title: Optional[str] = None
@@ -73,7 +75,8 @@ async def list_sessions(
     sessions = result.scalars().all()
     return [{
         "id": s.id, "title": s.title, "mode": s.mode, "model": s.model,
-        "temperature": s.temperature, "created_at": s.created_at, "updated_at": s.updated_at
+        "temperature": s.temperature, "agent_id": s.agent_id,
+        "created_at": s.created_at, "updated_at": s.updated_at
     } for s in sessions]
 
 @router.post("/sessions")
@@ -86,22 +89,59 @@ async def create_session(req: CreateSessionRequest, current_user: User = Depends
     if session_count >= settings.MAX_SESSIONS_PER_USER:
         raise HTTPException(status_code=400, detail=f"Maximum of {settings.MAX_SESSIONS_PER_USER} sessions reached. Delete some to continue.")
     
+    # If agent_id is provided, load the agent and apply its config
+    agent_data = None
+    if req.agent_id:
+        agent_result = await db.execute(select(Agent).where(Agent.id == req.agent_id))
+        agent_obj = agent_result.scalar_one_or_none()
+        if not agent_obj:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        agent_data = {
+            "id": agent_obj.id,
+            "name": agent_obj.name,
+            "avatar_emoji": agent_obj.avatar_emoji,
+            "avatar_color": agent_obj.avatar_color,
+            "welcome_message": agent_obj.welcome_message,
+            "conversation_starters": agent_obj.conversation_starters or [],
+        }
+        # Increment agent usage counter
+        agent_obj.usage_count = (agent_obj.usage_count or 0) + 1
+
     # Resolve model: use request model or fall back to the configured provider's default
     from app.config import settings as cfg
-    if req.model is None:
+    if req.agent_id and agent_obj:
+        resolved_model = agent_obj.model or req.model
+        resolved_temp = agent_obj.temperature if agent_obj.temperature is not None else req.temperature
+        resolved_prompt = agent_obj.system_prompt or req.system_prompt
+    else:
+        resolved_model = req.model
+        resolved_temp = req.temperature
+        resolved_prompt = req.system_prompt
+
+    if resolved_model is None:
         if cfg.AI_PROVIDER == "ollama":
             resolved_model = cfg.OLLAMA_DEFAULT_MODEL
         elif cfg.AI_PROVIDER == "gemini":
             resolved_model = cfg.GEMINI_DEFAULT_MODEL
         else:
             resolved_model = cfg.OPENAI_DEFAULT_MODEL
-    else:
-        resolved_model = req.model
-    session = ChatSession(user_id=current_user.id, title=req.title, mode=req.mode, model=resolved_model, temperature=req.temperature, system_prompt=req.system_prompt)
+
+    session = ChatSession(
+        user_id=current_user.id, title=req.title, mode=req.mode,
+        model=resolved_model, temperature=resolved_temp,
+        system_prompt=resolved_prompt, agent_id=req.agent_id,
+    )
     db.add(session)
     await db.commit()
     await db.refresh(session)
-    return {"id": session.id, "title": session.title, "mode": session.mode, "model": session.model, "temperature": session.temperature}
+    resp = {
+        "id": session.id, "title": session.title, "mode": session.mode,
+        "model": session.model, "temperature": session.temperature,
+        "agent_id": session.agent_id,
+    }
+    if agent_data:
+        resp["agent"] = agent_data
+    return resp
 
 @router.get("/sessions/{session_id}/messages")
 async def get_messages(
@@ -238,6 +278,14 @@ async def stream_message(
     db.add(user_msg)
     await db.commit()
 
+    # Load agent tool whitelist if session is linked to an agent
+    tools_whitelist = None
+    if session.agent_id:
+        agent_result = await db.execute(select(Agent).where(Agent.id == session.agent_id))
+        agent_obj = agent_result.scalar_one_or_none()
+        if agent_obj and agent_obj.tools_enabled and agent_obj.tools_enabled != ["*"]:
+            tools_whitelist = agent_obj.tools_enabled
+
     # RAG retrieval - inject document context into prompt
     rag_context = None
     if req.use_rag:
@@ -258,7 +306,8 @@ async def stream_message(
             temperature=session.temperature,
             mode=session.mode,
             system_prompt=session.system_prompt,
-            rag_context=rag_context
+            rag_context=rag_context,
+            tools_whitelist=tools_whitelist
         ):
             try:
                 data = json.loads(chunk.replace("data: ", ""))

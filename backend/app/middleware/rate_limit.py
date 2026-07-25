@@ -1,76 +1,105 @@
 """
-Rate Limiting Middleware
-Simple in-memory rate limiter using sliding window per IP address.
-For production, consider Redis-backed rate limiting.
+Production Tiered & Endpoint-Aware Rate Limiting Middleware
+Applies endpoint-specific rate limits by User ID (authenticated) or Client IP (unauthenticated).
+Supports standard headers (X-RateLimit-Limit, X-RateLimit-Remaining, Retry-After).
 """
 
-import time
-from collections import defaultdict
-from typing import Dict, List
-from fastapi import Request, Response
+from typing import Tuple
+from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from app.config import settings
+from app.services.rate_limit_service import rate_limit_service
+from app.utils.auth import decode_access_token
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Per-IP rate limiter using a sliding window algorithm."""
-    
-    def __init__(self, app, max_requests: int = None, window_seconds: int = 60):
-        super().__init__(app)
-        self.max_requests = max_requests or settings.RATE_LIMIT_RPM
-        self.window_seconds = window_seconds
-        self.requests: Dict[str, List[float]] = defaultdict(list)
-    
-    def _get_client_ip(self, request: Request) -> str:
-        """Extract client IP, respecting X-Forwarded-For for proxies."""
+    """
+    Tiered, user & endpoint aware rate limiting middleware.
+    """
+
+    def _get_endpoint_tier(self, path: str) -> Tuple[str, int]:
+        """Classify endpoint path into a rate limit tier and max requests per minute."""
+        # 1. AI Image Generation (heavy GPU / external API resource)
+        if path.startswith("/api/images"):
+            return "image_gen", settings.RATE_LIMIT_IMAGE_RPM
+
+        # 2. SSE Streaming Chat Messages
+        if "/messages/stream" in path:
+            return "chat_stream", settings.RATE_LIMIT_CHAT_RPM
+
+        # 3. Auth & Sensitive Endpoints (Login, Register, Password Reset)
+        if path.startswith("/api/auth/login") or path.startswith("/api/auth/register") or path.startswith("/api/auth/verify"):
+            return "auth", settings.RATE_LIMIT_AUTH_RPM
+
+        # 4. Standard API default
+        return "standard", settings.RATE_LIMIT_RPM
+
+    def _get_client_identifier(self, request: Request) -> Tuple[str, str]:
+        """
+        Identify client by User ID if Bearer token present, otherwise by Client IP.
+        Respects X-Forwarded-For for load balancers / NGINX reverse proxies.
+        """
+        # Try JWT User ID extraction first
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1].strip()
+            payload = decode_access_token(token)
+            if payload and "sub" in payload:
+                return f"user:{payload['sub']}", "user"
+
+        # Fallback to IP address
         forwarded = request.headers.get("X-Forwarded-For")
         if forwarded:
-            return forwarded.split(",")[0].strip()
-        return request.client.host if request.client else "unknown"
-    
-    def _is_rate_limited(self, client_ip: str) -> bool:
-        """Check if the client has exceeded the rate limit."""
-        now = time.time()
-        window_start = now - self.window_seconds
-        
-        # Remove expired entries
-        self.requests[client_ip] = [
-            ts for ts in self.requests[client_ip] if ts > window_start
-        ]
-        
-        if len(self.requests[client_ip]) >= self.max_requests:
-            return True
-        
-        self.requests[client_ip].append(now)
-        return False
-    
+            ip = forwarded.split(",")[0].strip()
+        elif request.client:
+            ip = request.client.host
+        else:
+            ip = "unknown"
+
+        return f"ip:{ip}", "ip"
+
     async def dispatch(self, request: Request, call_next):
         if not settings.RATE_LIMIT_ENABLED:
             return await call_next(request)
-        
-        # Skip rate limiting for health checks
-        if request.url.path in ("/", "/health"):
+
+        # Bypass rate limiting for system health checks & static files
+        path = request.url.path
+        if path in ("/", "/health", "/docs", "/openapi.json") or path.startswith("/static"):
             return await call_next(request)
-        
-        client_ip = self._get_client_ip(request)
-        
-        if self._is_rate_limited(client_ip):
+
+        tier_name, max_rpm = self._get_endpoint_tier(path)
+        client_id, id_type = self._get_client_identifier(request)
+
+        # Redis key format: ratelimit:{tier}:{client_id}
+        rate_key = f"ratelimit:{tier_name}:{client_id}"
+
+        is_limited, remaining, retry_after = await rate_limit_service.is_rate_limited(
+            key=rate_key,
+            max_requests=max_rpm,
+            window_seconds=60
+        )
+
+        if is_limited:
             return JSONResponse(
                 status_code=429,
                 content={
-                    "detail": "Too many requests. Please try again later.",
-                    "retry_after": self.window_seconds,
+                    "detail": f"Rate limit exceeded for {tier_name} tier. Please try again in {retry_after} seconds.",
+                    "tier": tier_name,
+                    "retry_after": retry_after,
                 },
-                headers={"Retry-After": str(self.window_seconds)},
+                headers={
+                    "Retry-After": str(retry_after),
+                    "X-RateLimit-Limit": str(max_rpm),
+                    "X-RateLimit-Remaining": "0",
+                },
             )
-        
+
         response = await call_next(request)
-        
-        # Add rate limit headers
-        remaining = max(0, self.max_requests - len(self.requests.get(client_ip, [])))
-        response.headers["X-RateLimit-Limit"] = str(self.max_requests)
+
+        # Attach rate limit response headers
+        response.headers["X-RateLimit-Limit"] = str(max_rpm)
         response.headers["X-RateLimit-Remaining"] = str(remaining)
-        
+
         return response

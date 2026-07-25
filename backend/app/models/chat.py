@@ -13,9 +13,11 @@ class ChatSession(Base):
     model = Column(String, default="gpt-4o-mini")
     temperature = Column(Float, default=0.7)
     system_prompt = Column(Text, nullable=True)
+    agent_id = Column(String, ForeignKey("agents.id"), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     user = relationship("User", back_populates="sessions")
+    agent = relationship("Agent", back_populates="sessions")
     messages = relationship("Message", back_populates="session", cascade="all, delete-orphan", order_by="Message.created_at")
     documents = relationship("SessionDocument", back_populates="session", cascade="all, delete-orphan")
 

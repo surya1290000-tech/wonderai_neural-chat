@@ -47,12 +47,17 @@ def _auto_migrate(connection):
             connection.execute(text("ALTER TABLE users ADD COLUMN avatar_url VARCHAR"))
         if "updated_at" not in existing_cols:
             connection.execute(text("ALTER TABLE users ADD COLUMN updated_at DATETIME"))
+    # Auto-migrate: add agent_id to chat_sessions if missing
+    if inspector.has_table("chat_sessions"):
+        session_cols = {col["name"] for col in inspector.get_columns("chat_sessions")}
+        if "agent_id" not in session_cols:
+            connection.execute(text("ALTER TABLE chat_sessions ADD COLUMN agent_id VARCHAR"))
 
 
 async def init_db():
     """Create all tables on startup and apply migrations"""
     async with engine.begin() as conn:
-        from app.models import user, chat, session_document  # noqa: import models to register them
+        from app.models import user, chat, session_document, agent  # noqa: import models to register them
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_auto_migrate)
 
