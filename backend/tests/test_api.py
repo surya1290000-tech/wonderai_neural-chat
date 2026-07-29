@@ -356,3 +356,29 @@ class TestChatSessions:
         resp = await client.get("/api/chat/search?q=hello", headers=headers)
         assert resp.status_code == 200
         assert resp.json() == []
+
+
+# ─── Rate Limiting Tests ─────────────────────────────────────────────
+class TestRateLimiting:
+    @pytest.mark.anyio
+    async def test_rate_limiting_middleware(self, client):
+        try:
+            settings.RATE_LIMIT_ENABLED = True
+            settings.RATE_LIMIT_AUTH_RPM = 2
+            
+            # 1st request - should pass
+            r1 = await client.post("/api/auth/login", json={"email": "limit@example.com", "password": "wrongpassword"})
+            assert r1.status_code != 429
+
+            # 2nd request - should pass
+            r2 = await client.post("/api/auth/login", json={"email": "limit@example.com", "password": "wrongpassword"})
+            assert r2.status_code != 429
+
+            # 3rd request - should be rate limited (429)
+            r3 = await client.post("/api/auth/login", json={"email": "limit@example.com", "password": "wrongpassword"})
+            assert r3.status_code == 429
+            assert "Rate limit exceeded" in r3.json()["detail"]
+            assert "Retry-After" in r3.headers
+        finally:
+            settings.RATE_LIMIT_ENABLED = False
+
