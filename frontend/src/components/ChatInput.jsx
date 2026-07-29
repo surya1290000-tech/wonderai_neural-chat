@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react'
+import { audioAPI } from '../utils/api'
 
 const ChatInput = forwardRef(function ChatInput({ onSend, disabled, useRag, setUseRag, onUploadPDF, onStop, streaming }, ref) {
   const [value, setValue] = useState('')
@@ -6,8 +7,13 @@ const ChatInput = forwardRef(function ChatInput({ onSend, disabled, useRag, setU
   const [isDragOver, setIsDragOver] = useState(false)
   const [images, setImages] = useState([])
   const [isListening, setIsListening] = useState(false)
+  const [isTranscribing, setIsTranscribing] = useState(false)
+  const [recordingMode, setRecordingMode] = useState('mediaRecorder')
+  
   const textareaRef = useRef()
   const recognitionRef = useRef(null)
+  const mediaRecorderRef = useRef(null)
+  const audioChunksRef = useRef([])
 
   // Expose focus method via ref
   useImperativeHandle(ref, () => ({
@@ -34,36 +40,91 @@ const ChatInput = forwardRef(function ChatInput({ onSend, disabled, useRag, setU
     setImages(prev => prev.filter((_, i) => i !== index))
   }
 
-  const toggleListening = () => {
-    if (isListening) {
-      recognitionRef.current?.stop()
+  const startFallbackWebSpeech = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      alert('Voice recognition is not supported in this browser. Try Chrome or Edge.')
+      return
+    }
+    setRecordingMode('webSpeech')
+    const rec = new SpeechRecognition()
+    rec.continuous = true
+    rec.interimResults = true
+    rec.onresult = (e) => {
+      let transcript = ''
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        transcript += e.results[i][0].transcript
+      }
+      setValue(prev => (prev ? prev + ' ' + transcript : transcript))
+    }
+    rec.onend = () => setIsListening(false)
+    rec.onerror = () => setIsListening(false)
+    try {
+      rec.start()
+      recognitionRef.current = rec
+      setIsListening(true)
+    } catch (err) {
       setIsListening(false)
-    } else {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-      if (!SpeechRecognition) {
-        alert('Voice recognition is not supported in this browser. Try Chrome or Edge.')
-        return
+    }
+  }
+
+  const toggleListening = async () => {
+    if (isListening) {
+      if (recordingMode === 'mediaRecorder' && mediaRecorderRef.current) {
+        mediaRecorderRef.current.stop()
+      } else if (recognitionRef.current) {
+        recognitionRef.current.stop()
       }
-      const rec = new SpeechRecognition()
-      rec.continuous = true
-      rec.interimResults = true
-      rec.onresult = (e) => {
-        let transcript = ''
-        for (let i = e.resultIndex; i < e.results.length; i++) {
-          transcript += e.results[i][0].transcript
-        }
-        setValue(prev => (prev ? prev + ' ' + transcript : transcript))
-      }
-      rec.onend = () => setIsListening(false)
-      rec.onerror = () => setIsListening(false)
+      setIsListening(false)
+      return
+    }
+
+    // Try MediaRecorder + Whisper API first
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       try {
-        rec.start()
-        recognitionRef.current = rec
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        const mediaRecorder = new MediaRecorder(stream)
+        mediaRecorderRef.current = mediaRecorder
+        audioChunksRef.current = []
+
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) audioChunksRef.current.push(e.data)
+        }
+
+        mediaRecorder.onstop = async () => {
+          stream.getTracks().forEach(track => track.stop())
+          const mimeType = mediaRecorder.mimeType || 'audio/webm'
+          const audioBlob = new Blob(audioChunksRef.current, { type: mimeType })
+          if (audioBlob.size === 0) return
+
+          const extension = mimeType.includes('mp4') ? 'mp4' : mimeType.includes('wav') ? 'wav' : 'webm'
+          const file = new File([audioBlob], `speech_input.${extension}`, { type: mimeType })
+
+          setIsTranscribing(true)
+          try {
+            const { data } = await audioAPI.transcribe(file)
+            if (data?.text) {
+              setValue(prev => prev ? `${prev} ${data.text}` : data.text)
+            }
+          } catch (err) {
+            console.warn('Whisper API failed, falling back to local speech recognition:', err)
+            startFallbackWebSpeech()
+          } finally {
+            setIsTranscribing(false)
+          }
+        }
+
+        mediaRecorder.start()
+        setRecordingMode('mediaRecorder')
         setIsListening(true)
+        return
       } catch (err) {
-        setIsListening(false)
+        console.warn('Mic access denied or unsupported, using WebSpeech fallback:', err)
       }
     }
+
+    // Fallback to Web Speech API
+    startFallbackWebSpeech()
   }
 
   const send = () => {
@@ -213,18 +274,19 @@ const ChatInput = forwardRef(function ChatInput({ onSend, disabled, useRag, setU
 
         <button
           onClick={toggleListening}
-          title={isListening ? "Stop listening" : "Voice input (Dictation)"}
+          disabled={isTranscribing}
+          title={isTranscribing ? "Transcribing speech..." : isListening ? "Stop listening" : "Voice input (Whisper STT)"}
           style={{
             fontSize: 12, padding: '5px 12px', borderRadius: 20,
-            background: isListening ? 'rgba(248,113,113,0.15)' : 'rgba(255,255,255,0.03)',
-            border: `1px solid ${isListening ? 'rgba(248,113,113,0.3)' : 'rgba(255,255,255,0.06)'}`,
-            color: isListening ? '#f87171' : '#777',
-            cursor: 'pointer', transition: 'all 0.25s ease',
+            background: isTranscribing ? 'rgba(212,132,94,0.15)' : isListening ? 'rgba(248,113,113,0.15)' : 'rgba(255,255,255,0.03)',
+            border: `1px solid ${isTranscribing ? 'rgba(212,132,94,0.3)' : isListening ? 'rgba(248,113,113,0.3)' : 'rgba(255,255,255,0.06)'}`,
+            color: isTranscribing ? '#d4845e' : isListening ? '#f87171' : '#777',
+            cursor: isTranscribing ? 'wait' : 'pointer', transition: 'all 0.25s ease',
             fontWeight: 500, display: 'flex', alignItems: 'center', gap: 5,
             animation: isListening ? 'pulse 1.5s infinite' : 'none',
           }}
         >
-          🎙️ {isListening ? 'Listening...' : 'Voice'}
+          {isTranscribing ? '⚡ Transcribing...' : isListening ? '🔴 Recording...' : '🎙️ Voice'}
         </button>
 
         <button

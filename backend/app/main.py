@@ -11,7 +11,7 @@ from app.config import settings
 from app.database import init_db
 import os
 from fastapi.staticfiles import StaticFiles
-from app.routes import auth, chat, rag, models, tools, images, agents
+from app.routes import auth, chat, rag, models, tools, images, agents, audio
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.logging import LoggingMiddleware
 
@@ -58,6 +58,7 @@ app.include_router(models.router, prefix="/api/models", tags=["Models"])
 app.include_router(tools.router, prefix="/api/tools", tags=["Tools"])
 app.include_router(images.router, prefix="/api/images", tags=["Images"])
 app.include_router(agents.router, prefix="/api/agents", tags=["Agents"])
+app.include_router(audio.router, prefix="/api/audio", tags=["Audio"])
 
 @app.get("/")
 async def root():

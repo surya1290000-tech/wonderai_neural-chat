@@ -119,6 +119,15 @@ export const ragAPI = {
   stats: (sessionId) => api.get(`/rag/stats?session_id=${sessionId}`),
 }
 
+// Audio STT
+export const audioAPI = {
+  transcribe: (file) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return api.post('/audio/transcribe', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+  },
+}
+
 // Images API
 export const imagesAPI = {
   generate: (d) => api.post('/images/generate', d),
