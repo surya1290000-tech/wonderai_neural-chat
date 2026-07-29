@@ -50,6 +50,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from app.routes import auth, chat, rag, models, tools, images, agents, audio, analytics
+
 # Register route modules
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
@@ -59,6 +61,7 @@ app.include_router(tools.router, prefix="/api/tools", tags=["Tools"])
 app.include_router(images.router, prefix="/api/images", tags=["Images"])
 app.include_router(agents.router, prefix="/api/agents", tags=["Agents"])
 app.include_router(audio.router, prefix="/api/audio", tags=["Audio"])
+app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
 
 @app.get("/")
 async def root():

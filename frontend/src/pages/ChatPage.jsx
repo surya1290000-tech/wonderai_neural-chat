@@ -7,6 +7,7 @@ import KnowledgePanel from '../components/KnowledgePanel'
 import ArtifactsPanel from '../components/ArtifactsPanel'
 import AgentBuilderModal from '../components/AgentBuilderModal'
 import AgentSelector from '../components/AgentSelector'
+import AnalyticsModal from '../components/AnalyticsModal'
 import { chatAPI, streamMessage, ragAPI, modelsAPI, agentsAPI } from '../utils/api'
 import { useAuth } from '../context/AuthContext'
 
@@ -200,6 +201,7 @@ export default function ChatPage() {
   const [showAgentBuilder, setShowAgentBuilder] = useState(false)
   const [editAgent, setEditAgent] = useState(null)
   const [activeSessionAgent, setActiveSessionAgent] = useState(null)
+  const [showAnalytics, setShowAnalytics] = useState(false)
 
   const bottomRef = useRef()
   const abortRef = useRef(null)
@@ -509,6 +511,7 @@ export default function ChatPage() {
         onOpenAgents={() => setShowAgentSelector(true)}
         onOpenBuilder={() => { setEditAgent(null); setShowAgentBuilder(true) }}
         selectedAgent={selectedAgent}
+        onOpenAnalytics={() => setShowAnalytics(true)}
       />
 
       <div style={{
@@ -675,6 +678,12 @@ export default function ChatPage() {
         showNotif={showNotif}
         sessionId={activeSessionId}
         refreshTrigger={kbRefresh}
+      />
+
+      {/* Analytics Modal */}
+      <AnalyticsModal
+        isOpen={showAnalytics}
+        onClose={() => setShowAnalytics(false)}
       />
     </div>
   )

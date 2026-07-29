@@ -128,6 +128,11 @@ export const audioAPI = {
   },
 }
 
+// Analytics API
+export const analyticsAPI = {
+  getUsage: () => api.get('/analytics/usage'),
+}
+
 // Images API
 export const imagesAPI = {
   generate: (d) => api.post('/images/generate', d),

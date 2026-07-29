@@ -3,7 +3,7 @@ import { chatAPI } from '../utils/api'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 
-export default function Sidebar({ activeSession, onSelectSession, onNewChat, sessions, setSessions, onOpenAgents, onOpenBuilder, selectedAgent }) {
+export default function Sidebar({ activeSession, onSelectSession, onNewChat, sessions, setSessions, onOpenAgents, onOpenBuilder, selectedAgent, onOpenAnalytics }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const [hoveredId, setHoveredId] = useState(null)
@@ -377,6 +377,25 @@ export default function Sidebar({ activeSession, onSelectSession, onNewChat, ses
                 </span>
               </div>
             </div>
+
+            {/* Usage & Analytics */}
+            <button
+              onClick={() => { setShowProfile(false); onOpenAnalytics && onOpenAnalytics() }}
+              style={{
+                width: '100%', padding: '12px 16px',
+                background: 'transparent', border: 'none',
+                color: '#aaa', fontSize: 13, fontWeight: 500,
+                cursor: 'pointer', textAlign: 'left',
+                display: 'flex', alignItems: 'center', gap: 8,
+                transition: 'background 0.2s',
+                fontFamily: 'Outfit',
+                borderBottom: '1px solid rgba(255,255,255,0.06)',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(212,132,94,0.08)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              📊 Usage & Analytics
+            </button>
 
             {/* Settings */}
             <button
