@@ -24,8 +24,9 @@ from app.main import app
 from app.database import Base, get_db
 from app.config import settings
 
-# Disable rate limiting for tests
+# Disable rate limiting and 2FA requirement for test suite
 settings.RATE_LIMIT_ENABLED = False
+settings.ENABLE_2FA = False
 
 
 # ─── Test database setup ────────────────────────────────────────────
@@ -50,7 +51,7 @@ async def setup_db():
     _blacklisted_tokens.clear()
     
     async with test_engine.begin() as conn:
-        from app.models import user, chat  # noqa: register models
+        import app.models  # noqa: register all models
         await conn.run_sync(Base.metadata.create_all)
     yield
     async with test_engine.begin() as conn:

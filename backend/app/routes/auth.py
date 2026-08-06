@@ -11,7 +11,7 @@ from pydantic import BaseModel, EmailStr, field_validator
 
 from app.config import settings
 from app.database import get_db
-from app.models.user import User, EmailOTP
+from app.models.user import User, EmailOTP, AuditLog, utc_now
 from app.utils.auth import (
     hash_password, verify_password,
     create_token, create_token_pair,
@@ -204,6 +204,9 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     user = result.scalar_one_or_none()
     
     if not user or not verify_password(req.password, user.hashed_password):
+        if user:
+            db.add(AuditLog(user_id=user.id, event="login_failed"))
+            await db.commit()
         raise HTTPException(status_code=401, detail="Invalid credentials")
         
     if settings.ENABLE_2FA:
@@ -224,11 +227,24 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
             "purpose": "login"
         }
     
+    user.last_login_at = utc_now()
+    db.add(AuditLog(user_id=user.id, event="login_success"))
+    await db.commit()
+
     tokens = create_token_pair(user.id)
     return {
         "token": tokens["access_token"],
         "refresh_token": tokens["refresh_token"],
-        "user": {"id": user.id, "email": user.email, "username": user.username}
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "username": user.username,
+            "full_name": user.full_name,
+            "avatar_url": user.avatar_url,
+            "role": getattr(user, "role", "user"),
+            "tier": getattr(user, "tier", "free"),
+            "preferences": user.preferences or {"theme": "dark", "default_model": "gemini-flash-latest", "notifications": True},
+        }
     }
 
 @router.post("/verify-2fa")
@@ -296,7 +312,34 @@ async def logout(
 
 @router.get("/me")
 async def get_me(current_user: User = Depends(get_current_user)):
-    return {"id": current_user.id, "email": current_user.email, "username": current_user.username}
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "username": current_user.username,
+        "full_name": current_user.full_name,
+        "avatar_url": current_user.avatar_url,
+        "role": getattr(current_user, "role", "user"),
+        "tier": getattr(current_user, "tier", "free"),
+        "auth_provider": getattr(current_user, "auth_provider", "local"),
+        "preferences": current_user.preferences or {"theme": "dark", "default_model": "gemini-flash-latest", "notifications": True},
+        "is_verified": current_user.is_verified,
+        "created_at": current_user.created_at,
+        "last_login_at": current_user.last_login_at,
+    }
+
+class UpdatePreferencesRequest(BaseModel):
+    preferences: dict
+
+@router.put("/preferences")
+async def update_preferences(
+    req: UpdatePreferencesRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    current_user.preferences = req.preferences
+    await db.commit()
+    await db.refresh(current_user)
+    return {"message": "Preferences updated successfully", "preferences": current_user.preferences}
 
 @router.post("/change-password")
 async def change_password(

@@ -214,7 +214,7 @@ export default function KnowledgePanel({ isOpen, onClose, onUploadDocument, show
               fontSize: 12, textTransform: 'uppercase', color: 'var(--text-muted)',
               fontWeight: 600, letterSpacing: '0.05em', marginBottom: 12,
             }}>Session Documents</h3>
-            
+
             {loading ? (
               <div style={{ textAlign: 'center', padding: 20, color: 'var(--text-muted)', fontSize: 13 }}>
                 Loading...

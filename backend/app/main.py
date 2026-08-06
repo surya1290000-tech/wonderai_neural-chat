@@ -63,10 +63,25 @@ app.include_router(agents.router, prefix="/api/agents", tags=["Agents"])
 app.include_router(audio.router, prefix="/api/audio", tags=["Audio"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
 
+from sqlalchemy import text
+from app.database import AsyncSessionLocal
+
 @app.get("/")
 async def root():
     return {"message": "Wonder AI API is running", "version": "3.0.0"}
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "provider": settings.AI_PROVIDER}
+    db_status = "healthy"
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+    except Exception as e:
+        db_status = f"unhealthy: {str(e)}"
+
+    return {
+        "status": "healthy" if db_status == "healthy" else "degraded",
+        "database": db_status,
+        "provider": settings.AI_PROVIDER,
+        "version": "3.0.0"
+    }

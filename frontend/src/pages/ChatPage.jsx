@@ -189,7 +189,7 @@ export default function ChatPage() {
   const [streaming, setStreaming] = useState(false)
   const [useRag, setUseRag] = useState(false)
   const [notification, setNotification] = useState(null)
-  const [defaultModel, setDefaultModel] = useState('mistral')
+  const [defaultModel, setDefaultModel] = useState('gemini-flash-latest')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [kbOpen, setKbOpen] = useState(false)
   const [kbRefresh, setKbRefresh] = useState(0)
