@@ -294,6 +294,7 @@ export default function MessageBubble({ message, isStreaming, onRegenerate, onFe
   const isUser = message.role === 'user'
   const [copied, setCopied] = useState(false)
   const [liked, setLiked] = useState(message.meta?.feedback || null)
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false)
   const images = message.meta?.images || message.images || []
   const webSources = message.meta?.web_sources || []
   const isSearching = message.meta?.searching || false
@@ -302,7 +303,23 @@ export default function MessageBubble({ message, isStreaming, onRegenerate, onFe
   const handleCopy = () => { navigator.clipboard.writeText(message.content); setCopied(true); setTimeout(() => setCopied(false), 2000) }
   const handleRegenerate = () => { if (onRegenerate) onRegenerate(message.id) }
   const handleLike = (type) => { const v = liked === type ? null : type; setLiked(v); if (onFeedback) onFeedback(message.id, v || 'none') }
-  const handleReadAloud = () => { if ('speechSynthesis' in window) { const u = new SpeechSynthesisUtterance(message.content); u.rate = 1.0; u.pitch = 1.0; window.speechSynthesis.speak(u) } }
+  const handleReadAloud = () => {
+    if (!('speechSynthesis' in window)) return
+    if (isPlayingAudio || window.speechSynthesis.speaking) {
+      window.speechSynthesis.cancel()
+      setIsPlayingAudio(false)
+      return
+    }
+    window.speechSynthesis.cancel()
+    const cleanText = message.content.replace(/```[\s\S]*?```/g, '').replace(/[*_#`\[\]]/g, '').trim()
+    const u = new SpeechSynthesisUtterance(cleanText)
+    u.rate = 1.0
+    u.pitch = 1.0
+    u.onend = () => setIsPlayingAudio(false)
+    u.onerror = () => setIsPlayingAudio(false)
+    setIsPlayingAudio(true)
+    window.speechSynthesis.speak(u)
+  }
 
   const avatarBg = isUser
     ? 'rgba(255,255,255,0.08)'
@@ -400,7 +417,7 @@ export default function MessageBubble({ message, isStreaming, onRegenerate, onFe
             <div style={{ display: 'flex', gap: 2, marginTop: 10, animation: 'fadeIn 0.3s ease' }}>
               <ActionButton icon={copied ? '✓' : '📋'} label={copied ? 'Copied!' : 'Copy'} onClick={handleCopy} active={copied} activeColor="rgba(74,222,128,0.1)" />
               <ActionButton icon="🔄" label="Regenerate" onClick={handleRegenerate} />
-              <ActionButton icon="🔊" label="Read" onClick={handleReadAloud} />
+              <ActionButton icon={isPlayingAudio ? '⏹' : '🔊'} label={isPlayingAudio ? 'Stop' : 'Read'} onClick={handleReadAloud} active={isPlayingAudio} activeColor="rgba(212,132,94,0.15)" />
               <ActionButton icon="👍" onClick={() => handleLike('up')} active={liked === 'up'} activeColor="rgba(74,222,128,0.1)" />
               <ActionButton icon="👎" onClick={() => handleLike('down')} active={liked === 'down'} activeColor="rgba(248,113,113,0.1)" />
             </div>

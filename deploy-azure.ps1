@@ -2,75 +2,103 @@
 # WonderAI NeuralChat - Azure Cloud Infrastructure & Deployment Script
 # =====================================================================
 
-$ErrorActionPreference = "Stop"
-
-# Ensure Azure CLI is in PATH
+$ErrorActionPreference = "Continue"
 $env:Path += ";C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin"
 
-Write-Host "⚡ Checking Azure CLI installation..." -ForegroundColor Cyan
+# Prevent Windows CLI socket connection reset issues (10054)
+$env:AZURE_CLI_DISABLE_CONNECTION_REUSE = "1"
+$env:AZURE_CORE_OUTPUT_COLOR = "0"
+
+function Invoke-AzWithRetry {
+    param([string]$Command)
+    $attempts = 0
+    while ($attempts -lt 5) {
+        $attempts++
+        Write-Host "[+] Executing: $Command (Attempt $attempts)..." -ForegroundColor Cyan
+        $out = Invoke-Expression $Command 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            return $out
+        }
+        Write-Host "[!] Command returned error or network reset. Retrying in 5 seconds..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 5
+    }
+    Write-Error "Command failed after $attempts attempts: $Command"
+    exit 1
+}
+
+Write-Host "[+] Checking Azure CLI installation..." -ForegroundColor Cyan
 if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
     Write-Error "Azure CLI ('az') is not installed or not in PATH."
     exit 1
 }
 
 # 1. Login check
-Write-Host "🔐 Verifying Azure account login..." -ForegroundColor Cyan
-$account = az account show 2>$null | ConvertFrom-Json
-if (-not $account) {
-    Write-Host "🔑 Initiating Azure login..." -ForegroundColor Yellow
+Write-Host "[+] Verifying Azure account login..." -ForegroundColor Cyan
+$accountRaw = az account show 2>$null
+if (-not $accountRaw) {
+    Write-Host "[!] Initiating Azure login..." -ForegroundColor Yellow
     az login
-    $account = az account show | ConvertFrom-Json
+    $accountRaw = az account show
 }
+$account = $accountRaw | ConvertFrom-Json
+Write-Host "[OK] Logged in as: $($account.user.name) (Subscription: $($account.name))" -ForegroundColor Green
 
-Write-Host "✅ Logged in as: $($account.user.name) (Subscription: $($account.name))" -ForegroundColor Green
+# 2. Resource Provider Registration
+Write-Host "[+] Ensuring Resource Providers (Microsoft.ContainerRegistry & Microsoft.ContainerService) are registered..." -ForegroundColor Cyan
+az provider register --namespace Microsoft.ContainerRegistry 2>$null
+az provider register --namespace Microsoft.ContainerService 2>$null
 
-# Parameters
-$RESOURCE_GROUP = "wonderai-rg"
-$LOCATION = "centralindia"
-$RANDOM_SUFFIX = (Get-Random -Minimum 1000 -Maximum 9999)
-$ACR_NAME = "wonderaicr$RANDOM_SUFFIX"
+# Parameters (Location set to 'koreacentral' which is authorized by Azure for Students policy AND supported by Google Gemini AI API)
+$RESOURCE_GROUP = "wonderai-kc-rg"
+$LOCATION = "koreacentral"
+$ACR_NAME = "wonderaicr9872"
 $AKS_NAME = "wonderai-aks"
-
-# 2. Create Resource Group
-Write-Host "📁 Creating Resource Group: $RESOURCE_GROUP in $LOCATION..." -ForegroundColor Cyan
-az group create --name $RESOURCE_GROUP --location $LOCATION | Out-Null
-
-# 3. Create Container Registry (ACR)
-Write-Host "📦 Creating Azure Container Registry: $ACR_NAME..." -ForegroundColor Cyan
-az acr create --resource-group $RESOURCE_GROUP --name $ACR_NAME --sku Basic | Out-Null
-
 $ACR_SERVER = "$ACR_NAME.azurecr.io"
-Write-Host "✅ Container Registry Created: $ACR_SERVER" -ForegroundColor Green
 
-# 4. Log in to ACR
-Write-Host "🔓 Logging into ACR..." -ForegroundColor Cyan
-az acr login --name $ACR_NAME
+# 3. Resource Group
+Write-Host "[+] Ensuring Resource Group $RESOURCE_GROUP exists in $LOCATION..." -ForegroundColor Cyan
+Invoke-AzWithRetry "az group create --name $RESOURCE_GROUP --location $LOCATION --output none"
+Write-Host "[OK] Resource Group $RESOURCE_GROUP ready." -ForegroundColor Green
 
-# 5. Tag and Push Local Images to ACR
-Write-Host "🐳 Tagging and pushing Docker images to Azure ACR..." -ForegroundColor Cyan
+# 4. Azure Container Registry
+Write-Host "[+] Ensuring Azure Container Registry $ACR_NAME exists..." -ForegroundColor Cyan
+Invoke-AzWithRetry "az acr create --resource-group $RESOURCE_GROUP --name $ACR_NAME --sku Basic --admin-enabled true --location $LOCATION --output none"
+Write-Host "[OK] Azure Container Registry $ACR_NAME ready." -ForegroundColor Green
 
-docker tag wonderai-backend:latest "$ACR_SERVER/wonderai-backend:v1.0"
-docker tag wonderai-frontend:latest "$ACR_SERVER/wonderai-frontend:v1.0"
+# 5. Provision AKS Cluster with Standard_D2s_v3 VM size
+Write-Host "[+] Provisioning Azure Kubernetes Service (AKS) Cluster: $AKS_NAME (Standard_D2s_v3 nodes)..." -ForegroundColor Cyan
+$aksCheck = az aks show --resource-group $RESOURCE_GROUP --name $AKS_NAME 2>$null
+if (-not $aksCheck) {
+    Invoke-AzWithRetry "az aks create --resource-group $RESOURCE_GROUP --name $AKS_NAME --node-count 2 --node-vm-size Standard_D2s_v3 --enable-managed-identity --attach-acr $ACR_NAME --generate-ssh-keys --output none"
+}
+Write-Host "[OK] AKS Cluster $AKS_NAME ready!" -ForegroundColor Green
 
-Write-Host "⬆️ Pushing Backend Image to $ACR_SERVER..." -ForegroundColor Yellow
+# 6. Docker Login & Image Push
+Write-Host "[+] Logging into ACR via Docker..." -ForegroundColor Cyan
+$acrPass = az acr credential show --name $ACR_NAME --query "passwords[0].value" -o tsv
+docker login $ACR_SERVER -u $ACR_NAME -p $acrPass
+
+Write-Host "[+] Building & Pushing Backend Image to ACR..." -ForegroundColor Cyan
+docker build -t "$ACR_SERVER/wonderai-backend:v1.0" ./backend
 docker push "$ACR_SERVER/wonderai-backend:v1.0"
 
-Write-Host "⬆️ Pushing Frontend Image to $ACR_SERVER..." -ForegroundColor Yellow
+Write-Host "[+] Building & Pushing Frontend Image to ACR..." -ForegroundColor Cyan
+docker build -t "$ACR_SERVER/wonderai-frontend:v1.0" ./frontend
 docker push "$ACR_SERVER/wonderai-frontend:v1.0"
 
-Write-Host "✅ Docker images pushed to ACR successfully!" -ForegroundColor Green
+Write-Host "[OK] Microservice container images built and pushed to ACR!" -ForegroundColor Green
 
-# 6. Create AKS Cluster attached to ACR
-Write-Host "☸️ Provisioning Azure Kubernetes Service (AKS) Cluster: $AKS_NAME..." -ForegroundColor Cyan
-az aks create `
-  --resource-group $RESOURCE_GROUP `
-  --name $AKS_NAME `
-  --node-count 2 `
-  --enable-managed-identity `
-  --attach-acr $ACR_NAME `
-  --generate-ssh-keys
+# 7. Fetch kubectl credentials
+Write-Host "[+] Getting AKS Cluster Credentials..." -ForegroundColor Cyan
+Invoke-AzWithRetry "az aks get-credentials --resource-group $RESOURCE_GROUP --name $AKS_NAME --overwrite-existing"
 
-Write-Host "🔑 Getting AKS Cluster Credentials for kubectl..." -ForegroundColor Cyan
-az aks get-credentials --resource-group $RESOURCE_GROUP --name $AKS_NAME --overwrite-existing
+# 8. Apply Kubernetes manifests
+Write-Host "[+] Deploying Kubernetes Workloads to AKS..." -ForegroundColor Cyan
+kubectl apply -f kubernetes/configmap.yaml
+kubectl apply -f kubernetes/secrets.yaml
+kubectl apply -f kubernetes/postgres-deployment.yaml
+kubectl apply -f kubernetes/redis-deployment.yaml
+kubectl apply -f kubernetes/backend-deployment.yaml
+kubectl apply -f kubernetes/frontend-deployment.yaml
 
-Write-Host "🎉 Azure Infrastructure Ready! Pods can now be deployed with kubectl." -ForegroundColor Green
+Write-Host "[OK] Azure Deployment Completed Successfully!" -ForegroundColor Green

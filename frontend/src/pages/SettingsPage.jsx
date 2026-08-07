@@ -1,8 +1,17 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import { authAPI } from '../utils/api'
 import { useNavigate } from 'react-router-dom'
+
+const AVATAR_PRESETS = [
+  "https://api.dicebear.com/7.x/bottts/svg?seed=wonder1",
+  "https://api.dicebear.com/7.x/bottts/svg?seed=wonder2",
+  "https://api.dicebear.com/7.x/bottts/svg?seed=wonder3",
+  "https://api.dicebear.com/7.x/avataaars/svg?seed=surya",
+  "https://api.dicebear.com/7.x/avataaars/svg?seed=alex",
+  "https://api.dicebear.com/7.x/identicon/svg?seed=neural",
+]
 
 export default function SettingsPage() {
   const { user, logout, updateProfile } = useAuth()
@@ -10,12 +19,51 @@ export default function SettingsPage() {
   const navigate = useNavigate()
   const [tab, setTab] = useState('general')
   const [notification, setNotification] = useState(null)
+  
+  // Profile Form State
+  const [profileForm, setProfileForm] = useState({
+    username: user?.username || '',
+    full_name: user?.full_name || '',
+    avatar_url: user?.avatar_url || AVATAR_PRESETS[0]
+  })
+  const [profileLoading, setProfileLoading] = useState(false)
+
+  // Password Form State
   const [passwordForm, setPasswordForm] = useState({ current: '', new: '', confirm: '' })
   const [passwordLoading, setPasswordLoading] = useState(false)
+
+  useEffect(() => {
+    if (user) {
+      setProfileForm({
+        username: user.username || '',
+        full_name: user.full_name || '',
+        avatar_url: user.avatar_url || AVATAR_PRESETS[0]
+      })
+    }
+  }, [user])
 
   const showNotif = (msg, type = 'success') => {
     setNotification({ msg, type })
     setTimeout(() => setNotification(null), 3500)
+  }
+
+  const handleSaveProfile = async () => {
+    if (!profileForm.username.trim()) {
+      showNotif('Username cannot be empty', 'error')
+      return
+    }
+    setProfileLoading(true)
+    try {
+      await updateProfile({
+        username: profileForm.username.trim(),
+        full_name: profileForm.full_name.trim(),
+        avatar_url: profileForm.avatar_url.trim()
+      })
+      showNotif('Profile updated successfully')
+    } catch (e) {
+      showNotif(e.response?.data?.detail || 'Failed to update profile', 'error')
+    }
+    setProfileLoading(false)
   }
 
   const handleChangePassword = async () => {
@@ -57,7 +105,7 @@ export default function SettingsPage() {
   }
 
   const tabs = [
-    { id: 'general', label: '⚙ General' },
+    { id: 'general', label: '⚙ General & Profile' },
     { id: 'security', label: '🔒 Security' },
     { id: 'appearance', label: '🎨 Appearance' },
   ]
@@ -88,7 +136,7 @@ export default function SettingsPage() {
           color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.02em',
         }}>Settings</h1>
         <p style={{ color: 'var(--text-muted)', fontSize: 14, marginTop: 6 }}>
-          Manage your account and preferences
+          Manage your account, profile, and preferences
         </p>
       </div>
 
@@ -119,19 +167,84 @@ export default function SettingsPage() {
         {tab === 'general' && (
           <div style={{ animation: 'fadeInUp 0.3s ease' }}>
             <div style={sectionStyle}>
-              <h3 style={{ fontFamily: 'Outfit', fontSize: 16, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 16 }}>Profile</h3>
+              <h3 style={{ fontFamily: 'Outfit', fontSize: 16, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 16 }}>Profile Information</h3>
+              
+              {/* Avatar Selector */}
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ display: 'block', color: 'var(--text-muted)', fontSize: 12, fontWeight: 500, marginBottom: 8 }}>Avatar</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12 }}>
+                  <img
+                    src={profileForm.avatar_url}
+                    alt="Avatar Preview"
+                    style={{ width: 56, height: 56, borderRadius: '50%', border: '2px solid var(--accent)', background: '#232326' }}
+                  />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Select Avatar Preset</div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      {AVATAR_PRESETS.map((url, idx) => (
+                        <img
+                          key={idx}
+                          src={url}
+                          alt="Preset"
+                          onClick={() => setProfileForm(p => ({ ...p, avatar_url: url }))}
+                          style={{
+                            width: 32, height: 32, borderRadius: '50%', cursor: 'pointer',
+                            border: profileForm.avatar_url === url ? '2px solid var(--accent)' : '1px solid var(--border)',
+                            opacity: profileForm.avatar_url === url ? 1 : 0.6,
+                            transition: 'all 0.2s',
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <input
+                  type="text" style={inputStyle}
+                  value={profileForm.avatar_url}
+                  onChange={e => setProfileForm(p => ({ ...p, avatar_url: e.target.value }))}
+                  placeholder="Or enter custom avatar image URL..."
+                />
+              </div>
+
               <div style={{ marginBottom: 14 }}>
                 <label style={{ display: 'block', color: 'var(--text-muted)', fontSize: 12, fontWeight: 500, marginBottom: 6 }}>Email</label>
                 <div style={{ ...inputStyle, background: 'rgba(255,255,255,0.02)', color: 'var(--text-secondary)' }}>
                   {user?.email}
                 </div>
               </div>
-              <div>
-                <label style={{ display: 'block', color: 'var(--text-muted)', fontSize: 12, fontWeight: 500, marginBottom: 6 }}>Username</label>
-                <div style={{ ...inputStyle, background: 'rgba(255,255,255,0.02)', color: 'var(--text-secondary)' }}>
-                  {user?.username}
-                </div>
+
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: 'block', color: 'var(--text-muted)', fontSize: 12, fontWeight: 500, marginBottom: 6 }}>Display Name</label>
+                <input
+                  type="text" style={inputStyle}
+                  value={profileForm.full_name}
+                  onChange={e => setProfileForm(p => ({ ...p, full_name: e.target.value }))}
+                  placeholder="Enter full name..."
+                />
               </div>
+
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ display: 'block', color: 'var(--text-muted)', fontSize: 12, fontWeight: 500, marginBottom: 6 }}>Username</label>
+                <input
+                  type="text" style={inputStyle}
+                  value={profileForm.username}
+                  onChange={e => setProfileForm(p => ({ ...p, username: e.target.value }))}
+                  placeholder="Enter username..."
+                />
+              </div>
+
+              <button
+                onClick={handleSaveProfile}
+                disabled={profileLoading}
+                style={{
+                  background: 'var(--accent)', color: '#fff', border: 'none',
+                  borderRadius: 12, padding: '12px 24px', fontWeight: 600, fontSize: 14,
+                  cursor: 'pointer', fontFamily: 'Outfit', transition: 'all 0.2s',
+                  opacity: profileLoading ? 0.5 : 1,
+                }}
+              >
+                {profileLoading ? 'Saving...' : 'Save Profile Changes'}
+              </button>
             </div>
 
             <div style={sectionStyle}>

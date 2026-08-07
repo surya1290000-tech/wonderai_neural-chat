@@ -8,12 +8,23 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const stored = localStorage.getItem('nc_user')
-    const token = localStorage.getItem('nc_token')
-    if (stored && token) {
-      setUser(JSON.parse(stored))
+    const initAuth = async () => {
+      const stored = localStorage.getItem('nc_user')
+      const token = localStorage.getItem('nc_token')
+      if (token) {
+        try {
+          const { data } = await authAPI.getProfile()
+          setUser(data)
+          localStorage.setItem('nc_user', JSON.stringify(data))
+        } catch (err) {
+          if (stored) {
+            try { setUser(JSON.parse(stored)) } catch {}
+          }
+        }
+      }
+      setLoading(false)
     }
-    setLoading(false)
+    initAuth()
   }, [])
 
   const login = async (email, password) => {
@@ -75,10 +86,12 @@ export function AuthProvider({ children }) {
     setUser(null)
   }
 
-  const updateProfile = (updates) => {
-    const updated = { ...user, ...updates }
-    localStorage.setItem('nc_user', JSON.stringify(updated))
-    setUser(updated)
+  const updateProfile = async (updates) => {
+    const { data } = await authAPI.updateProfile(updates)
+    const updatedUser = data.user || { ...user, ...updates }
+    localStorage.setItem('nc_user', JSON.stringify(updatedUser))
+    setUser(updatedUser)
+    return data
   }
 
   return (

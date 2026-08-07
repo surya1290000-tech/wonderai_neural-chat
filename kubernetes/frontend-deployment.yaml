@@ -16,8 +16,8 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: wonderai-frontend:latest
-          imagePullPolicy: IfNotPresent
+          image: wonderaicr9872.azurecr.io/wonderai-frontend:v1.0
+          imagePullPolicy: Always
           ports:
             - containerPort: 80
           resources:

@@ -39,6 +39,10 @@ class Base(DeclarativeBase):
 def _auto_migrate(connection):
     from sqlalchemy import inspect, text
     inspector = inspect(connection)
+    is_postgres = connection.dialect.name.startswith("postgres")
+    datetime_type = "TIMESTAMP" if is_postgres else "DATETIME"
+    json_type = "JSON" if is_postgres else "JSON"
+
     if inspector.has_table("users"):
         existing_cols = {col["name"] for col in inspector.get_columns("users")}
         if "full_name" not in existing_cols:
@@ -46,7 +50,7 @@ def _auto_migrate(connection):
         if "avatar_url" not in existing_cols:
             connection.execute(text("ALTER TABLE users ADD COLUMN avatar_url VARCHAR"))
         if "updated_at" not in existing_cols:
-            connection.execute(text("ALTER TABLE users ADD COLUMN updated_at DATETIME"))
+            connection.execute(text(f"ALTER TABLE users ADD COLUMN updated_at {datetime_type}"))
         if "role" not in existing_cols:
             connection.execute(text("ALTER TABLE users ADD COLUMN role VARCHAR DEFAULT 'user'"))
         if "tier" not in existing_cols:
@@ -54,9 +58,9 @@ def _auto_migrate(connection):
         if "auth_provider" not in existing_cols:
             connection.execute(text("ALTER TABLE users ADD COLUMN auth_provider VARCHAR DEFAULT 'local'"))
         if "preferences" not in existing_cols:
-            connection.execute(text("ALTER TABLE users ADD COLUMN preferences JSON"))
+            connection.execute(text(f"ALTER TABLE users ADD COLUMN preferences {json_type}"))
         if "last_login_at" not in existing_cols:
-            connection.execute(text("ALTER TABLE users ADD COLUMN last_login_at DATETIME"))
+            connection.execute(text(f"ALTER TABLE users ADD COLUMN last_login_at {datetime_type}"))
     # Auto-migrate: add agent_id to chat_sessions if missing
     if inspector.has_table("chat_sessions"):
         session_cols = {col["name"] for col in inspector.get_columns("chat_sessions")}

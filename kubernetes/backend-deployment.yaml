@@ -16,8 +16,8 @@ spec:
     spec:
       containers:
         - name: backend
-          image: wonderai-backend:latest
-          imagePullPolicy: IfNotPresent
+          image: wonderaicr9872.azurecr.io/wonderai-backend:v1.0
+          imagePullPolicy: Always
           ports:
             - containerPort: 8000
           envFrom:

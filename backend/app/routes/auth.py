@@ -2,6 +2,7 @@
 
 import re
 import secrets
+from typing import Optional
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Depends, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -329,6 +330,56 @@ async def get_me(current_user: User = Depends(get_current_user)):
 
 class UpdatePreferencesRequest(BaseModel):
     preferences: dict
+
+class UpdateProfileRequest(BaseModel):
+    username: Optional[str] = None
+    full_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+
+@router.put("/profile")
+async def update_profile(
+    req: UpdateProfileRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update display profile information for authenticated user."""
+    if req.username:
+        username = req.username.strip()
+        if len(username) < 2 or len(username) > settings.MAX_USERNAME_LENGTH:
+            raise HTTPException(status_code=400, detail=f"Username must be 2-{settings.MAX_USERNAME_LENGTH} characters")
+        if not re.match(r'^[a-zA-Z0-9_.-]+$', username):
+            raise HTTPException(status_code=400, detail="Username can only contain letters, numbers, dots, hyphens, and underscores")
+        
+        # Check if username taken by another user
+        existing = await db.execute(select(User).where(User.username == username).where(User.id != current_user.id))
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Username is already taken")
+        current_user.username = username
+
+    if req.full_name is not None:
+        current_user.full_name = req.full_name.strip()
+    if req.avatar_url is not None:
+        current_user.avatar_url = req.avatar_url.strip()
+
+    current_user.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(current_user)
+
+    return {
+        "message": "Profile updated successfully",
+        "user": {
+            "id": current_user.id,
+            "email": current_user.email,
+            "username": current_user.username,
+            "full_name": current_user.full_name,
+            "avatar_url": current_user.avatar_url,
+            "role": getattr(current_user, "role", "user"),
+            "tier": getattr(current_user, "tier", "free"),
+            "auth_provider": getattr(current_user, "auth_provider", "local"),
+            "preferences": current_user.preferences,
+            "is_verified": current_user.is_verified,
+        }
+    }
 
 @router.put("/preferences")
 async def update_preferences(
