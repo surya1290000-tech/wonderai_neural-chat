@@ -71,6 +71,7 @@ async def root():
     return {"message": "Wonder AI API is running", "version": "3.0.0"}
 
 @app.get("/health")
+@app.get("/api/health")
 async def health_check():
     db_status = "healthy"
     try:
