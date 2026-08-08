@@ -72,10 +72,11 @@ jobs:
           tags: wonderai-frontend:test
 
   # JOB 3: Push to Azure Container Registry & Deploy to AKS
+  # Only runs on push to main (not PRs). Requires AZURE_CREDENTIALS secret to be configured.
   deploy-to-kubernetes:
     needs: docker-build-verify
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && secrets.AZURE_CREDENTIALS != ''
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
 
     steps:
       - name: Checkout Code
