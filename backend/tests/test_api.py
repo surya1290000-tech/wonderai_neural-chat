@@ -30,7 +30,7 @@ settings.ENABLE_2FA = False
 
 
 # ─── Test database setup ────────────────────────────────────────────
-TEST_DATABASE_URL = "sqlite+aiosqlite:///./data/test_neuralchat.db"
+TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 TestSessionLocal = async_sessionmaker(test_engine, expire_on_commit=False)
 
