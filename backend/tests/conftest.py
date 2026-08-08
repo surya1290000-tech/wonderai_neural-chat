@@ -5,9 +5,10 @@ Pytest configuration and shared fixtures for backend tests
 import sys
 from unittest.mock import MagicMock
 
-# Mock heavy ML libraries that may have C extension issues
-faiss_mock = MagicMock()
-sys.modules.setdefault('faiss', faiss_mock)
+# Mock ALL heavy ML/AI libs before any app import so they don't need to be installed
+for mod in ['faiss', 'sentence_transformers', 'torch', 'numpy',
+            'pdfplumber', 'docx', 'pgvector']:
+    sys.modules.setdefault(mod, MagicMock())
 
 import pytest
 import pytest_asyncio
@@ -23,7 +24,7 @@ settings.RATE_LIMIT_ENABLED = False
 settings.ENABLE_2FA = False
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
-test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+test_engine = create_async_engine(TEST_DATABASE_URL, echo=False, connect_args={"check_same_thread": False})
 TestSessionLocal = async_sessionmaker(test_engine, expire_on_commit=False)
 
 
@@ -40,7 +41,7 @@ async def setup_db():
     """Create tables before each test, drop after. Also clear token blacklist."""
     from app.utils.auth import _blacklisted_tokens
     _blacklisted_tokens.clear()
-    
+
     async with test_engine.begin() as conn:
         import app.models  # noqa: register all models
         await conn.run_sync(Base.metadata.create_all)

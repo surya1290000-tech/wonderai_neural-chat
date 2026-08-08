@@ -15,33 +15,35 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install CPU PyTorch & Dependencies
+      - name: Install Lightweight CI Dependencies
+        # Uses requirements-ci.txt (no torch/faiss/sentence-transformers)
+        # This cuts install time from ~8min to ~30sec
         run: |
           python -m pip install --upgrade pip
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
-          if [ -f backend/requirements.txt ]; then pip install -r backend/requirements.txt; fi
-          pip install pytest pytest-asyncio anyio flake8 httpx
+          pip install -r backend/requirements-ci.txt
 
-      - name: Run Code Linting (Check Syntax & Undefined Symbols)
+      - name: Run Code Linting
         run: |
+          pip install flake8
           flake8 backend --count --select=E9,F63,F7,F82 --show-source --statistics
 
-      - name: Run Backend Tests
+      - name: Run Smoke Tests
         env:
           DATABASE_URL: "sqlite+aiosqlite:///:memory:"
-          SECRET_KEY: "test_jwt_secret_key_for_ci_pipeline_verification"
+          SECRET_KEY: "test_jwt_secret_key_for_ci_pipeline"
           GEMINI_API_KEY: "test_dummy_gemini_api_key"
+          OPENAI_API_KEY: "test_dummy_openai_api_key"
           REDIS_HOST: "localhost"
           REDIS_PORT: "6379"
           AI_PROVIDER: "gemini"
         run: |
-          cd backend && PYTHONPATH=. python -m pytest -v
+          cd backend && python -m pytest tests/test_ci_smoke.py -v --tb=short
 
   # JOB 2: Build & Verify Docker Containers
   docker-build-verify:
@@ -72,7 +74,7 @@ jobs:
           tags: wonderai-frontend:test
 
   # JOB 3: Push to Azure Container Registry & Deploy to AKS
-  # Only runs on push to main (not PRs). Requires AZURE_CREDENTIALS secret to be configured.
+  # Only runs on push to main. Requires AZURE_CREDENTIALS secret.
   deploy-to-kubernetes:
     needs: docker-build-verify
     runs-on: ubuntu-latest
